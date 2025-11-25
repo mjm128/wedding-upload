@@ -11,9 +11,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Check for Config/Banner
     fetch('/config').then(r => r.json()).then(config => {
-        if (config.banner_message) {
+        const bannerMsg = config[`banner_message_${currentLang}`] || config[`banner_message_en`];
+        if (bannerMsg) {
             const b = document.getElementById('banner');
-            b.innerText = config.banner_message;
+            b.innerText = bannerMsg;
             b.style.display = 'block';
             document.body.classList.add('has-banner');
         }
@@ -48,11 +49,12 @@ function checkGuestName() {
     } else {
         const display = name.split('-').reverse().join(' ');
         const welcome = document.getElementById('guest-welcome');
-        // We use custom text logic here instead of simple i18n key replacement
-        // because we need to insert the name.
-        // Simple hack:
-        const msg = t('welcome');
-        welcome.innerText = `${msg} ${display}`;
+        welcome.innerText = t('welcome').replace('{name}', display);
+
+        // Ensure UUID exists
+        if (!getCookie("guest_uuid")) {
+            document.cookie = `guest_uuid=${crypto.randomUUID()}; max-age=31536000; path=/; SameSite=Lax`;
+        }
     }
 }
 
@@ -61,31 +63,24 @@ function handleNameSubmit(e) {
     const first = document.getElementById('first-name').value.trim();
     const last = document.getElementById('last-name').value.trim();
 
-    // Validation
     const regex = /^[a-zA-Z0-9áéíóúÁÉÍÓÚñÑ\s-]+$/;
-    const invalidChars = /[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ\s-]/g;
-
-    if (!regex.test(first)) {
-        const bad = first.match(invalidChars);
-        showToast(`Invalid characters in First Name: ${bad ? bad.join(' ') : ''}. Only letters, numbers, spaces, hyphens allowed.`);
+    if (!regex.test(first) || !regex.test(last)) {
+        showToast("Invalid characters in name. Use letters, numbers, spaces, hyphens.");
         return;
     }
-    if (!regex.test(last)) {
-        const bad = last.match(invalidChars);
-        showToast(`Invalid characters in Last Name: ${bad ? bad.join(' ') : ''}. Only letters, numbers, spaces, hyphens allowed.`);
-        return;
-    }
-
     if (first.length > 20 || last.length > 20) {
         showToast("Name too long (max 20 chars).");
         return;
     }
 
     const fullName = `${last}-${first}`;
-    // Set cookie for 1 year
-    document.cookie = `guest_name=${encodeURIComponent(fullName)}; max-age=31536000; path=/`;
-    // Table number is legacy/optional now, set to 0
-    document.cookie = `table_number=0; max-age=31536000; path=/`;
+    document.cookie = `guest_name=${encodeURIComponent(fullName)}; max-age=31536000; path=/; SameSite=Lax`;
+    document.cookie = `table_number=0; max-age=31536000; path=/; SameSite=Lax`;
+
+    // Set UUID
+    if (!getCookie("guest_uuid")) {
+        document.cookie = `guest_uuid=${crypto.randomUUID()}; max-age=31536000; path=/; SameSite=Lax`;
+    }
 
     document.getElementById('setup-modal').style.display = 'none';
     checkGuestName();
@@ -146,8 +141,6 @@ function handleFileSelect(event) {
             file,
             function (img) {
                 previewArea.innerHTML = '';
-                img.style.maxWidth = '100%';
-                img.style.borderRadius = '8px';
                 previewArea.appendChild(img);
             },
             { maxWidth: 600, orientation: true }

@@ -15,6 +15,7 @@ class Media(Base):
     sha256_hash = Column(String, index=True)
 
     # Guest info
+    guest_uuid = Column(String, index=True, nullable=True)
     uploaded_by = Column(String, nullable=True) # Name if provided
     table_number = Column(String, nullable=True)
     caption = Column(Text, nullable=True)
@@ -26,6 +27,8 @@ class Media(Base):
     # Moderation / Display
     is_hidden = Column(Boolean, default=False)
     is_starred = Column(Boolean, default=False)
+    view_count = Column(Integer, default=0)
+    last_viewed = Column(DateTime(timezone=True), nullable=True)
 
     # Flags
     thumbnail_path = Column(String, nullable=True)
