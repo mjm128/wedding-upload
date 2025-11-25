@@ -50,6 +50,21 @@
                 <button class="btn" onclick="setBanner()">Set Banners</button>
                 <button class="btn btn-secondary" onclick="clearBanners()">Clear All</button>
             </div>
+            <div style="margin-bottom: 20px;">
+                <h3>Schedule Management</h3>
+                <div id="schedule-list"></div>
+                <div style="display:flex; gap:10px; margin-top:10px;">
+                    <input type="datetime-local" id="schedule-start" style="flex:1;">
+                    <input type="datetime-local" id="schedule-end" style="flex:1;">
+                    <select id="schedule-mode" style="flex:1;">
+                        <option value="standard">Standard</option>
+                        <option value="blackout">Blackout</option>
+                        <option value="unlimited">Unlimited</option>
+                    </select>
+                    <input type="text" id="schedule-message" placeholder="Custom message (optional)" style="flex:2;">
+                    <button class="btn" onclick="addSchedule()">Add</button>
+                </div>
+            </div>
         </div>
 
         <div class="glass-card">
@@ -70,7 +85,6 @@
             <div id="media-grid" class="masonry-grid">
                 <!-- Loaded via JS -->
             </div>
-            <button class="btn" id="load-more-btn" onclick="loadMedia()" style="display:none; width:100%; margin-top:10px;">Load More</button>
         </div>
     </div>
 

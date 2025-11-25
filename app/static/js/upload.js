@@ -183,7 +183,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         uploadBtn.innerText = `Retrying (${attempt}/${maxRetries})...`;
                         await new Promise(r => setTimeout(r, 2000 * attempt)); // Exponential backoffish
                     } else {
-                        showToast('Upload failed. Please check connection and try again.');
+                        // On final failure, show the specific error
+                        showToast(error.message || 'Upload failed. Please check connection and try again.');
                     }
                 }
             }
@@ -251,7 +252,7 @@ async function loadMyUploads() {
 }
 
 
-function previewImage(url, type) {
+function previewImage(url, type, caption = '') {
     if (type === 'video') return; // Or implement video player modal
 
     const modalId = 'preview-modal';
@@ -259,18 +260,20 @@ function previewImage(url, type) {
     if (!modal) {
         modal = document.createElement('div');
         modal.id = modalId;
-        modal.style.cssText = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); z-index:3000; display:flex; align-items:center; justify-content:center;";
+        modal.style.cssText = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); z-index:3000; display:flex; align-items:center; justify-content:center; flex-direction:column;";
         modal.innerHTML = `
             <div style="position:relative; max-width:95%; max-height:95%;">
                 <button onclick="document.getElementById('${modalId}').style.display='none'" style="position:absolute; top:-30px; right:0; color:white; background:none; border:none; font-size:30px; cursor:pointer;">&times;</button>
                 <img id="${modalId}-img" style="max-width:100%; max-height:90vh; border-radius:8px;">
             </div>
+            <div id="${modalId}-caption" style="color:white; margin-top:10px; font-size:1.2em;"></div>
         `;
         document.body.appendChild(modal);
-        modal.onclick = (e) => { if(e.target === modal) modal.style.display='none'; };
+        modal.onclick = (e) => { if(e.target.id === modalId) modal.style.display='none'; };
     }
 
     document.getElementById(`${modalId}-img`).src = url;
+    document.getElementById(`${modalId}-caption`).innerText = caption;
     modal.style.display = 'flex';
 }
 
@@ -313,7 +316,14 @@ function uploadWithProgress(formData, onProgress) {
                     reject(new Error(response.message || 'Upload failed'));
                 }
             } else {
-                reject(new Error(xhr.statusText || 'Upload failed'));
+                let errorMsg = xhr.statusText || 'Upload failed';
+                try {
+                    const errJson = JSON.parse(xhr.responseText);
+                    errorMsg = errJson.detail || errorMsg;
+                } catch (e) {
+                    // Ignore parsing error
+                }
+                reject(new Error(errorMsg));
             }
         };
 
