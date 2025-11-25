@@ -3,7 +3,7 @@
 const TRANSLATIONS = {
     "en": {
         "share_memories": "Share Your Memories",
-        "welcome": "Welcome!",
+        "welcome": "Welcome, {name}!",
         "select_files": "Select Photos & Videos",
         "your_uploads": "Your Uploads",
         "add_caption": "Add a caption...",
@@ -15,6 +15,7 @@ const TRANSLATIONS = {
         "confirm_delete": "Are you sure you want to delete this?",
         "yes": "Yes",
         "no": "No",
+        "live_feed": "LIVE FEED",
         "help_title": "How it Works",
         "help_text": "Select photos or videos from your gallery. Add a caption if you like. Once uploaded, your memories will appear on the live slideshow!",
         "close": "Close",
@@ -22,7 +23,8 @@ const TRANSLATIONS = {
     },
     "es": {
         "share_memories": "Comparte tus Recuerdos",
-        "welcome": "¡Bienvenido!",
+        "welcome": "¡Bienvenido, {name}!",
+        "live_feed": "VER EN VIVO",
         "select_files": "Seleccionar Fotos y Videos",
         "your_uploads": "Tus Subidas",
         "add_caption": "Añade un pie de foto...",

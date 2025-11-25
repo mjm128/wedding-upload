@@ -19,7 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.security import APIKeyCookie
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, desc, func, delete, text, or_
+from sqlalchemy import select, update, desc, func, delete, text, or_, Integer
 
 import aiofiles
 from PIL import Image
@@ -167,7 +167,8 @@ async def get_current_guest(request: Request):
     """Dependency to identify guest session."""
     guest_name = request.cookies.get("guest_name")
     table_number = request.cookies.get("table_number")
-    return {"name": guest_name, "table": table_number}
+    guest_uuid = request.cookies.get("guest_uuid")
+    return {"name": guest_name, "table": table_number, "uuid": guest_uuid}
 
 # --- Routes ---
 
@@ -196,12 +197,13 @@ async def index(
 @app.get("/config")
 async def get_frontend_config(db: AsyncSession = Depends(get_db)):
     """Returns dynamic config for frontend."""
-    # Get global banner
-    result = await db.execute(select(AppConfig).where(AppConfig.key == "GLOBAL_BANNER_MESSAGE"))
-    banner = result.scalar_one_or_none()
+    keys = ["GLOBAL_BANNER_MESSAGE_EN", "GLOBAL_BANNER_MESSAGE_ES"]
+    result = await db.execute(select(AppConfig).where(AppConfig.key.in_(keys)))
+    banners = {c.key: c.value for c in result.scalars()}
 
     return {
-        "banner_message": banner.value if banner else None,
+        "banner_message_en": banners.get("GLOBAL_BANNER_MESSAGE_EN"),
+        "banner_message_es": banners.get("GLOBAL_BANNER_MESSAGE_ES"),
         "max_file_size_mb": settings.MAX_MEDIA_SIZE_MB,
         "max_video_duration_sec": settings.MAX_VIDEO_DURATION_SEC,
         "mode": check_schedule_mode(),
@@ -292,7 +294,7 @@ async def upload_media(
     # 5. Generate Thumbnail (Save to THUMBNAIL_DIR)
     thumb_filename = None
     try:
-        thumb_name = f"thumb_{unique_filename}.jpg"
+        thumb_name = f"thumb_{unique_filename.split('.')[0]}.jpg"
         thumb_path = os.path.join(settings.THUMBNAIL_DIR, thumb_name)
 
         if content_type.startswith("image"):
@@ -329,6 +331,7 @@ async def upload_media(
         mime_type=content_type,
         file_size_bytes=size,
         sha256_hash=file_hash,
+        guest_uuid=guest_info["uuid"],
         uploaded_by=guest_info["name"],
         table_number=guest_info["table"],
         caption=caption,
@@ -349,32 +352,66 @@ async def slideshow_feed(
     cursor: Optional[str] = None,
     q: Optional[str] = None,
     limit: int = 20,
+    admin_mode: bool = False,
+    filter: Optional[str] = None,
+    type: Optional[str] = None,
     db: AsyncSession = Depends(get_db)
 ):
     """
     Returns media items.
     Cursor is a timestamp (ISO string).
     """
-    query = select(Media).where(Media.is_hidden == False)
+    query = select(Media)
+    if not admin_mode:
+        query = query.where(Media.is_hidden == False)
+        # Biased Sorting for slideshow
+        now = datetime.now(pytz.utc)
+        age_hours = (now - Media.created_at) / timedelta(hours=1)
+
+        # Score: Starred items get a huge boost. Newer items get a boost. Less viewed items get a boost.
+        score = (
+            (func.cast(Media.is_starred, Integer) * 1000) +
+            (100 / (age_hours + 1)) +
+            (10 / (Media.view_count + 1))
+        ).label("score")
+
+        query = query.order_by(desc(score))
+    else:
+        # Admin view gets chronological
+        query = query.order_by(desc(Media.created_at), desc(Media.id))
+
+    if filter == "starred":
+        query = query.where(Media.is_starred == True)
+    elif filter == "hidden":
+        query = query.where(Media.is_hidden == True)
+
+    if type in ["image", "video"]:
+        query = query.where(Media.file_type == type)
 
     if q:
-        # Fuzzy search for Admin moderation
         search = f"%{q}%"
         query = query.where(or_(
             Media.caption.ilike(search),
             Media.uploaded_by.ilike(search),
-            Media.filename.ilike(search),
             Media.original_filename.ilike(search)
         ))
 
-    query = query.order_by(desc(Media.created_at), desc(Media.id)).limit(limit)
+    if admin_mode:
+        if cursor:
+            try:
+                cursor_ts, cursor_id = cursor.split('_')
+                cursor_dt = datetime.fromisoformat(cursor_ts)
+                # Efficient pagination: (created_at < cursor) OR (created_at == cursor AND id < cursor_id)
+                query = query.where(
+                    (Media.created_at < cursor_dt) |
+                    ((Media.created_at == cursor_dt) & (Media.id < int(cursor_id)))
+                )
+            except ValueError:
+                pass # Invalid cursor
+        query = query.order_by(desc(Media.created_at), desc(Media.id))
 
-    if cursor:
-        try:
-            cursor_dt = datetime.fromisoformat(cursor)
-            query = query.where(Media.created_at < cursor_dt)
-        except ValueError:
-            pass
+
+    query = query.limit(limit)
 
     result = await db.execute(query)
     media_items = result.scalars().all()
@@ -394,7 +431,24 @@ async def slideshow_feed(
             "is_hidden": m.is_hidden
         })
 
-    return {"items": data, "next_cursor": data[-1]["created_at"] if data else None}
+    next_cursor = f"{data[-1]['created_at']}_{data[-1]['id']}" if data else None
+    return {"items": data, "next_cursor": next_cursor}
+
+
+@app.post("/media/{media_id}/viewed")
+async def mark_media_viewed(media_id: int, db: AsyncSession = Depends(get_db)):
+    """Increments the view count for a media item."""
+    await db.execute(
+        update(Media)
+        .where(Media.id == media_id)
+        .values(
+            view_count=Media.view_count + 1,
+            last_viewed=func.now()
+        )
+    )
+    await db.commit()
+    return {"status": "ok"}
+
 
 @app.get("/my-uploads")
 async def my_uploads(
@@ -402,12 +456,11 @@ async def my_uploads(
     db: AsyncSession = Depends(get_db)
 ):
     """Returns uploads for the current guest session."""
-    if not guest_info["name"]:
+    if not guest_info["uuid"]:
         return []
 
     query = select(Media).where(
-        Media.uploaded_by == guest_info["name"],
-        Media.table_number == guest_info["table"]
+        Media.guest_uuid == guest_info["uuid"]
     ).order_by(desc(Media.created_at))
 
     result = await db.execute(query)
@@ -438,7 +491,7 @@ async def delete_media(
         raise HTTPException(404, "Media not found")
 
     # Check ownership
-    if media.uploaded_by != guest_info["name"]:
+    if media.guest_uuid != guest_info["uuid"]:
         raise HTTPException(403, "Not authorized")
 
     # Check if file exists on disk
@@ -467,7 +520,8 @@ async def public_stats(db: AsyncSession = Depends(get_db)):
     """Public stats for the live feed."""
     photo_count = await db.scalar(select(func.count(Media.id)).where(Media.file_type == 'image', Media.is_hidden == False))
     video_count = await db.scalar(select(func.count(Media.id)).where(Media.file_type == 'video', Media.is_hidden == False))
-    return {"photos": photo_count, "videos": video_count}
+    total_count = await db.scalar(select(func.count(Media.id)).where(Media.is_hidden == False))
+    return {"photos": photo_count, "videos": video_count, "total_media": total_count}
 
 # --- Admin Routes ---
 
@@ -526,6 +580,21 @@ async def admin_stats(is_admin: bool = Depends(get_admin_user), db: AsyncSession
                     last_backup = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
         except: pass
 
+    # Rclone status
+    rclone_config_path = "/root/.config/rclone/rclone.conf"
+    rclone_configured = os.path.exists(rclone_config_path)
+
+    # CPU Temp (for Linux)
+    cpu_temp = "N/A"
+    try:
+        temps = psutil.sensors_temperatures()
+        if 'coretemp' in temps:
+            cpu_temp = f"{temps['coretemp'][0].current}°C"
+        elif 'cpu_thermal' in temps:
+            cpu_temp = f"{temps['cpu_thermal'][0].current}°C"
+    except Exception:
+        pass
+
     return {
         "disk_total_gb": round(usage.total / (1024**3), 2),
         "disk_used_gb": round(usage.used / (1024**3), 2),
@@ -536,21 +605,30 @@ async def admin_stats(is_admin: bool = Depends(get_admin_user), db: AsyncSession
         "cpu_percent": cpu_usage,
         "ram_percent": ram.percent,
         "ram_used_gb": round(ram.used / (1024**3), 2),
-        "last_backup": last_backup
+        "last_backup": last_backup,
+        "rclone_configured": rclone_configured,
+        "cpu_temp": cpu_temp
     }
 
 @app.post("/admin/banner")
-async def set_banner(message: str = Form(...), is_admin: bool = Depends(get_admin_user), db: AsyncSession = Depends(get_db)):
+async def set_banner(
+    message_en: str = Form(""),
+    message_es: str = Form(""),
+    is_admin: bool = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db)
+):
     if not is_admin: raise HTTPException(status_code=401)
 
-    # Upsert
-    result = await db.execute(select(AppConfig).where(AppConfig.key == "GLOBAL_BANNER_MESSAGE"))
-    config = result.scalar_one_or_none()
+    async def upsert_banner(key: str, value: str):
+        result = await db.execute(select(AppConfig).where(AppConfig.key == key))
+        config = result.scalar_one_or_none()
+        if config:
+            config.value = value
+        elif value: # Only add if not empty
+            db.add(AppConfig(key=key, value=value))
 
-    if config:
-        config.value = message
-    else:
-        db.add(AppConfig(key="GLOBAL_BANNER_MESSAGE", value=message))
+    await upsert_banner("GLOBAL_BANNER_MESSAGE_EN", message_en)
+    await upsert_banner("GLOBAL_BANNER_MESSAGE_ES", message_es)
 
     await db.commit()
     return {"status": "updated"}
@@ -617,26 +695,33 @@ async def admin_purge(pin: str = Form(...), is_admin: bool = Depends(get_admin_u
 
 @app.get("/health")
 async def health_check(db: AsyncSession = Depends(get_db)):
-    # Check DB
+    # DB
     try:
         await db.execute(text("SELECT 1"))
         db_status = "ok"
-    except Exception as e:
-        db_status = f"error: {e}"
+    except Exception:
+        db_status = "error"
 
-    # Check Disk
+    # Disk
     try:
-        # Check if upload dir is writable
         test_file = os.path.join(settings.UPLOAD_DIR, "health_test")
-        with open(test_file, 'w') as f:
-            f.write("ok")
+        async with aiofiles.open(test_file, 'w') as f:
+            await f.write("ok")
         os.remove(test_file)
         disk_status = "ok"
-    except Exception as e:
-        disk_status = f"error: {e}"
+    except Exception:
+        disk_status = "error"
+
+    # System
+    cpu_percent = psutil.cpu_percent()
+    ram_percent = psutil.virtual_memory().percent
+
+    all_ok = all(s == "ok" for s in [db_status, disk_status]) and cpu_percent < 95 and ram_percent < 95
 
     return {
+        "status": "healthy" if all_ok else "unhealthy",
         "database": db_status,
         "disk": disk_status,
-        "status": "healthy" if db_status == "ok" and disk_status == "ok" else "unhealthy"
+        "cpu_percent": cpu_percent,
+        "ram_percent": ram_percent,
     }

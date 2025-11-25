@@ -7,68 +7,85 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Fetch Stats
 function loadStats() {
-    fetch('/admin/stats').then(r => r.json()).then(data => {
+    Promise.all([
+        fetch('/admin/stats').then(r => r.json()),
+        fetch('/public/stats').then(r => r.json())
+    ]).then(([adminStats, publicStats]) => {
+        const rcloneStatus = adminStats.rclone_configured ? '<span style="color: limegreen;">Configured</span>' : '<span style="color: orange;">Not Configured</span>';
+        const cpuTemp = adminStats.cpu_temp !== "N/A" ? `(${adminStats.cpu_temp})` : '';
         document.getElementById('stats').innerHTML = `
             <h3>System Metrics</h3>
-            <strong>CPU:</strong> ${data.cpu_percent}% | <strong>RAM:</strong> ${data.ram_percent}% (${data.ram_used_gb}GB)<br>
-            <strong>Storage:</strong> ${data.disk_used_gb}GB / ${data.disk_total_gb}GB (Free: ${data.disk_free_gb}GB)<br>
-            <strong>Last Backup:</strong> ${data.last_backup}<br><br>
+            <strong>CPU:</strong> ${adminStats.cpu_percent}% ${cpuTemp} | <strong>RAM:</strong> ${adminStats.ram_percent}% (${adminStats.ram_used_gb}GB)<br>
+            <strong>Storage:</strong> ${adminStats.disk_used_gb}GB / ${adminStats.disk_total_gb}GB (Free: ${adminStats.disk_free_gb}GB)<br>
+            <strong>Rclone:</strong> ${rcloneStatus} | <strong>Last Backup:</strong> ${adminStats.last_backup}<br><br>
 
             <h3>Media Breakdown</h3>
-            <strong>Total Media:</strong> ${data.media_total}<br>
-            <strong>Photos:</strong> ${data.media_photos} | <strong>Videos:</strong> ${data.media_videos}
+            <strong>Total Media:</strong> ${publicStats.total_media}<br>
+            <strong>Photos:</strong> ${publicStats.photos} | <strong>Videos:</strong> ${publicStats.videos}
         `;
     });
 }
 
 let searchTimeout = null;
 function filterMedia() {
-    const query = document.getElementById('media-search').value;
     if (searchTimeout) clearTimeout(searchTimeout);
-
     searchTimeout = setTimeout(() => {
         cursor = null; // Reset pagination
         document.getElementById('media-grid').innerHTML = '';
-        loadMedia(query);
-    }, 500);
+        loadMedia(); // Load media will now read from the filter inputs
+    }, 300);
 }
 
 // Banner
-async function setBanner(msg) {
-    const val = msg !== undefined ? msg : document.getElementById('banner-input').value;
+async function setBanner() {
+    const msg_en = document.getElementById('banner-input-en').value;
+    const msg_es = document.getElementById('banner-input-es').value;
     const formData = new FormData();
-    formData.append('message', val);
+    formData.append('message_en', msg_en);
+    formData.append('message_es', msg_es);
+
     await fetch('/admin/banner', { method: 'POST', body: formData });
-    showToast('Banner updated');
-    document.getElementById('banner-input').value = val || '';
-    updateCurrentBanner(val);
+    showToast('Banners updated');
+    updateCurrentBanner('en', msg_en);
+    updateCurrentBanner('es', msg_es);
 }
 
-function updateCurrentBanner(msg) {
-    const display = document.getElementById('current-banner-display');
+function clearBanners() {
+    document.getElementById('banner-input-en').value = '';
+    document.getElementById('banner-input-es').value = '';
+    setBanner();
+}
+
+
+function updateCurrentBanner(lang, msg) {
+    const display = document.getElementById(`current-banner-display-${lang}`);
     if (display) {
-        display.innerText = msg ? `Current: "${msg}"` : "No banner active";
+        display.innerText = msg ? `Current (${lang.toUpperCase()}): "${msg}"` : `No banner active (${lang.toUpperCase()})`;
         display.style.opacity = msg ? 1 : 0.5;
     }
 }
 
 // Init banner display
 fetch('/config').then(r => r.json()).then(c => {
-    if(c.banner_message) {
-        document.getElementById('banner-input').value = c.banner_message;
-        updateCurrentBanner(c.banner_message);
-    } else {
-        updateCurrentBanner("");
-    }
+    document.getElementById('banner-input-en').value = c.banner_message_en || '';
+    document.getElementById('banner-input-es').value = c.banner_message_es || '';
+    updateCurrentBanner('en', c.banner_message_en);
+    updateCurrentBanner('es', c.banner_message_es);
 });
 
 // Media
 let cursor = null;
 
-async function loadMedia(query = null) {
-    let url = '/slideshow/feed?limit=20';
-    if (cursor) url += '&cursor=' + cursor;
-    if (query) url += '&q=' + encodeURIComponent(query);
+async function loadMedia() {
+    const query = document.getElementById('media-search').value;
+    const filter = document.querySelector('input[name="filter"]:checked').value;
+    const type = document.querySelector('input[name="type"]:checked').value;
+
+    let url = `/slideshow/feed?limit=20&admin_mode=true`;
+    if (cursor) url += `&cursor=${cursor}`;
+    if (query) url += `&q=${encodeURIComponent(query)}`;
+    if (filter !== 'all') url += `&filter=${filter}`;
+    if (type !== 'all') url += `&type=${type}`;
 
     const res = await fetch(url);
     const data = await res.json();
@@ -148,22 +165,32 @@ function hidePurgeModal() {
 
 function submitPurge() {
     const pin = document.getElementById('purge-pin').value;
-    if (!pin) return;
+    if (!pin) {
+        showToast("PIN is required.");
+        return;
+    }
 
-    const fd = new FormData();
-    fd.append('pin', pin);
+    showConfirm("This will delete EVERYTHING: DB, uploads, archives, thumbnails. This is permanent.", () => {
+        const fd = new FormData();
+        fd.append('pin', pin);
 
-    fetch('/admin/purge', { method: 'POST', body: fd })
-        .then(r => r.json())
-        .then(data => {
-            if (data.status === 'purged') {
-                showToast("System Purged. Reloading.");
-                setTimeout(() => location.reload(), 2000);
-            } else {
-                showToast("Purge failed: " + (data.detail || 'Unknown error'));
-            }
-        })
-        .catch(e => showToast("Error: " + e));
+        fetch('/admin/purge', { method: 'POST', body: fd })
+            .then(async r => {
+                if (r.ok) return r.json();
+                const err = await r.json();
+                throw new Error(err.detail || 'Purge failed');
+            })
+            .then(data => {
+                if (data.status === 'purged') {
+                    showToast("System Purged. Reloading page.");
+                    setTimeout(() => location.reload(), 2000);
+                }
+            })
+            .catch(e => {
+                showToast(`Error: ${e.message}`);
+            });
+
+    }, true); // true = require checkbox
 
     hidePurgeModal();
 }

@@ -41,6 +41,7 @@ def test_upload_flow(setup_db):
     files = {"file": ("test.jpg", content, "image/jpeg")}
 
     client.cookies.set("guest_name", "TestUser")
+    client.cookies.set("guest_uuid", "test-uuid")
 
     response = client.post("/upload", files=files, data={"caption": "Test Caption"})
 
