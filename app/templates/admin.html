@@ -38,15 +38,29 @@
 
             <div style="margin-bottom: 20px;">
                 <h3>Media Moderation</h3>
-                <input type="text" id="media-search" placeholder="Filter media..." style="width: 100%; padding: 10px; margin-bottom: 10px; box-sizing: border-box;" onkeyup="filterMedia()">
+                 <div id="filter-bar" style="display:flex; flex-wrap:wrap; gap:15px; margin-bottom:10px; background: var(--glass-bg); padding:10px; border-radius:8px;">
+                    <input type="text" id="media-search" placeholder="Filter by name, caption..." style="flex:2; min-width:200px; padding:8px;" onkeyup="filterMedia()">
+                    <div>
+                        <label><input type="radio" name="filter" value="all" checked onchange="filterMedia()"> All</label>
+                        <label><input type="radio" name="filter" value="starred" onchange="filterMedia()"> Starred</label>
+                        <label><input type="radio" name="filter" value="hidden" onchange="filterMedia()"> Hidden</label>
+                    </div>
+                    <div>
+                        <label><input type="radio" name="type" value="all" checked onchange="filterMedia()"> All Types</label>
+                        <label><input type="radio" name="type" value="image" onchange="filterMedia()"> Photos</label>
+                        <label><input type="radio" name="type" value="video" onchange="filterMedia()"> Videos</label>
+                    </div>
+                </div>
             </div>
 
             <div style="margin-bottom: 20px;">
-                <h3>Global Banner</h3>
-                <div id="current-banner-display" style="margin-bottom: 10px; font-style: italic; color: var(--accent-color);"></div>
-                <input type="text" id="banner-input" placeholder="Enter message..." style="padding: 10px; width: 70%;">
-                <button class="btn" onclick="setBanner()">Set Banner</button>
-                <button class="btn btn-secondary" onclick="setBanner('')">Clear</button>
+                <h3>Global Banners</h3>
+                <div id="current-banner-display-en" style="margin-bottom: 5px; font-style: italic; color: var(--accent-color);"></div>
+                <input type="text" id="banner-input-en" placeholder="English Banner..." style="width:100%; padding:8px; box-sizing:border-box; margin-bottom:5px;">
+                <div id="current-banner-display-es" style="margin-bottom: 5px; font-style: italic; color: var(--accent-color);"></div>
+                <input type="text" id="banner-input-es" placeholder="Spanish Banner..." style="width:100%; padding:8px; box-sizing:border-box; margin-bottom:10px;">
+                <button class="btn" onclick="setBanner()">Set Banners</button>
+                <button class="btn btn-secondary" onclick="clearBanners()">Clear All</button>
             </div>
         </div>
 

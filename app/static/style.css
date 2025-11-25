@@ -10,12 +10,12 @@
 }
 
 [data-theme="light"] {
-    --bg-color: #F9F9F7; /* Cream */
-    --text-color: #333333; /* Charcoal */
-    --accent-color: #D4AF37; /* Gold */
-    --secondary-color: #A0A0A0;
-    --glass-bg: rgba(0, 0, 0, 0.05);
-    --glass-border: rgba(0, 0, 0, 0.1);
+    --bg-color: #f0f2f5;
+    --text-color: #1c1e21;
+    --accent-color: #D4AF37;
+    --secondary-color: #8A8D91;
+    --glass-bg: #ffffff;
+    --glass-border: #dcdfe3;
 }
 
 body {
@@ -237,4 +237,12 @@ body.has-banner .home-btn {
 
 .starred-media {
     border: 2px solid var(--accent-color);
+}
+
+#preview-area img {
+  max-width: 100%;
+  max-height: 40vh;
+  object-fit: contain;
+  border-radius: 8px;
+  background: rgba(0,0,0,0.2);
 }
