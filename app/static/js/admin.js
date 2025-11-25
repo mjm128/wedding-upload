@@ -20,7 +20,7 @@ function loadStats() {
             <strong>Rclone:</strong> ${rcloneStatus} | <strong>Last Backup:</strong> ${adminStats.last_backup}<br><br>
 
             <h3>Media Breakdown</h3>
-            <strong>Total Media:</strong> ${publicStats.total_media}<br>
+            <strong>Total Media:</strong> ${publicStats.total_media} (${adminStats.media_total_size_gb} GB)<br>
             <strong>Photos:</strong> ${publicStats.photos} | <strong>Videos:</strong> ${publicStats.videos}
         `;
     });
@@ -32,7 +32,7 @@ function filterMedia() {
     searchTimeout = setTimeout(() => {
         cursor = null; // Reset pagination
         document.getElementById('media-grid').innerHTML = '';
-        loadMedia(); // Load media will now read from the filter inputs
+        loadMedia(true); // Load media will now read from the filter inputs
     }, 300);
 }
 
@@ -73,10 +73,58 @@ fetch('/config').then(r => r.json()).then(c => {
     updateCurrentBanner('es', c.banner_message_es);
 });
 
+// Schedule
+async function loadSchedule() {
+    const res = await fetch('/admin/schedule');
+    const schedule = await res.json();
+    const list = document.getElementById('schedule-list');
+    list.innerHTML = '';
+    schedule.forEach((item, index) => {
+        const div = document.createElement('div');
+        div.innerHTML = `
+            <span>${new Date(item.start).toLocaleString()} - ${new Date(item.end).toLocaleString()}: ${item.mode}</span>
+            <button onclick="deleteSchedule(${index})">Delete</button>
+        `;
+        list.appendChild(div);
+    });
+}
+
+async function addSchedule() {
+    const start = document.getElementById('schedule-start').value;
+    const end = document.getElementById('schedule-end').value;
+    const mode = document.getElementById('schedule-mode').value;
+
+    if (!start || !end) {
+        showToast("Please select a start and end time.");
+        return;
+    }
+
+    const res = await fetch(`/admin/schedule?start=${start}&end=${end}&mode=${mode}`, { method: 'POST' });
+    if (res.ok) {
+        loadSchedule();
+    } else {
+        showToast("Failed to add schedule.");
+    }
+}
+
+async function deleteSchedule(index) {
+    const res = await fetch(`/admin/schedule/${index}`, { method: 'DELETE' });
+    if (res.ok) {
+        loadSchedule();
+    } else {
+        showToast("Failed to delete schedule.");
+    }
+}
+
+document.addEventListener('DOMContentLoaded', loadSchedule);
+
 // Media
 let cursor = null;
 
-async function loadMedia() {
+async function loadMedia(reset = false) {
+    if (reset) {
+        cursor = null;
+    }
     const query = document.getElementById('media-search').value;
     const filter = document.querySelector('input[name="filter"]:checked').value;
     const type = document.querySelector('input[name="type"]:checked').value;
@@ -102,10 +150,10 @@ async function loadMedia() {
         div.className = 'grid-item';
         div.innerHTML = `
             <div class="glass-card" style="padding: 10px;">
-                <div style="font-size:0.7em; color:#aaa; margin-bottom:5px;">UUID: ${item.filename.split('/').pop().split('.')[0]}</div>
+                <div style="font-size:0.7em; color:#aaa; margin-bottom:5px;">UUID: ${item.filename.split('/').pop().split('.')[0]}<br>Original: ${item.original_filename}</div>
                 ${item.type === 'video' ? '<span style="color:gold; font-weight:bold;">[VIDEO]</span>' : ''}
                 <img src="${item.thumbnail || item.url}" class="media-content ${item.is_hidden ? 'hidden-media' : ''} ${item.is_starred ? 'starred-media' : ''}" loading="lazy">
-                <p><strong>${item.author || 'Guest'}</strong><br>${item.caption || ''}</p>
+                <p><strong>${item.author || 'Guest'}</strong>: ${item.caption || ''}</p>
                 <div style="display: flex; gap: 5px; flex-wrap: wrap;">
                     <button class="btn-secondary" style="padding: 5px; flex:1;" onclick="action(${item.id}, '${item.is_hidden ? 'unhide' : 'hide'}')">${item.is_hidden ? 'Unhide' : 'Hide'}</button>
                     <button class="btn-secondary" style="padding: 5px; flex:1;" onclick="action(${item.id}, '${item.is_starred ? 'unstar' : 'star'}')">${item.is_starred ? 'Unstar' : 'Star'}</button>

@@ -64,8 +64,7 @@ templates = Jinja2Templates(directory="app/templates")
 # --- Helpers ---
 
 def get_current_time_in_zone():
-    tz = pytz.timezone(settings.EVENT_TIMEZONE)
-    return datetime.now(tz)
+    return datetime.now(pytz.timezone(settings.EVENT_TIMEZONE))
 
 def load_schedule():
     schedule_path = "schedule.json"
@@ -97,8 +96,13 @@ def check_schedule_mode():
 
     for block in schedule:
         try:
-            start = datetime.fromisoformat(block["start"]).astimezone(pytz.timezone(settings.EVENT_TIMEZONE))
-            end = datetime.fromisoformat(block["end"]).astimezone(pytz.timezone(settings.EVENT_TIMEZONE))
+            start = datetime.fromisoformat(block["start"])
+            end = datetime.fromisoformat(block["end"])
+
+            if start.tzinfo is None:
+                start = pytz.timezone(settings.EVENT_TIMEZONE).localize(start)
+            if end.tzinfo is None:
+                end = pytz.timezone(settings.EVENT_TIMEZONE).localize(end)
 
             if start <= now <= end:
                 current_mode = block.get("mode", "standard")
@@ -357,6 +361,7 @@ async def slideshow_feed(
     admin_mode: bool = False,
     filter: Optional[str] = None,
     type: Optional[str] = None,
+    order: str = "random",
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -366,18 +371,24 @@ async def slideshow_feed(
     query = select(Media)
     if not admin_mode:
         query = query.where(Media.is_hidden == False)
-        # Biased Sorting for slideshow
-        now = datetime.now(pytz.utc)
-        age_hours = (now - Media.created_at) / timedelta(hours=1)
+        if order == "newest":
+            query = query.order_by(desc(Media.created_at), desc(Media.id))
+        else:
+            # Biased Sorting for slideshow
+            now = datetime.now(pytz.utc)
+            age_minutes = (now - Media.created_at) / timedelta(minutes=1)
 
-        # Score: Starred items get a huge boost. Newer items get a boost. Less viewed items get a boost.
-        score = (
-            (func.cast(Media.is_starred, Integer) * 1000) +
-            (100 / (age_hours + 1)) +
-            (10 / (Media.view_count + 1))
-        ).label("score")
+            # Score: Starred items get a huge boost. Newer items get a boost. Less viewed items get a boost.
+            # - Starred media gets a massive 10,000 point bonus.
+            # - A freshness score that decays over time (5000 points initially, drops quickly).
+            # - A small bonus for items with fewer views.
+            score = (
+                (func.cast(Media.is_starred, Integer) * 10000) +
+                (5000 / (age_minutes + 10)) +
+                (50 / (Media.view_count + 1))
+            ).label("score")
 
-        query = query.order_by(desc(score))
+            query = query.order_by(desc(score))
     else:
         # Admin view gets chronological
         query = query.order_by(desc(Media.created_at), desc(Media.id))
@@ -430,7 +441,9 @@ async def slideshow_feed(
             "created_at": m.created_at.isoformat(),
             "is_starred": m.is_starred,
             "file_size": m.file_size_bytes,
-            "is_hidden": m.is_hidden
+            "is_hidden": m.is_hidden,
+            "filename": m.filename,
+            "original_filename": m.original_filename
         })
 
     next_cursor = f"{data[-1]['created_at']}_{data[-1]['id']}" if data else None
@@ -523,7 +536,8 @@ async def public_stats(db: AsyncSession = Depends(get_db)):
     photo_count = await db.scalar(select(func.count(Media.id)).where(Media.file_type == 'image', Media.is_hidden == False))
     video_count = await db.scalar(select(func.count(Media.id)).where(Media.file_type == 'video', Media.is_hidden == False))
     total_count = await db.scalar(select(func.count(Media.id)).where(Media.is_hidden == False))
-    return {"photos": photo_count, "videos": video_count, "total_media": total_count}
+    total_size = await db.scalar(select(func.sum(Media.file_size_bytes)).where(Media.is_hidden == False))
+    return {"photos": photo_count, "videos": video_count, "total_media": total_count, "total_size_gb": round(total_size / (1024**3), 2) if total_size else 0}
 
 # --- Admin Routes ---
 
@@ -565,6 +579,7 @@ async def admin_stats(is_admin: bool = Depends(get_admin_user), db: AsyncSession
     total_count = await db.scalar(select(func.count(Media.id)))
     photo_count = await db.scalar(select(func.count(Media.id)).where(Media.file_type == 'image'))
     video_count = await db.scalar(select(func.count(Media.id)).where(Media.file_type == 'video'))
+    total_size = await db.scalar(select(func.sum(Media.file_size_bytes)))
 
     # System Metrics
     cpu_usage = psutil.cpu_percent()
@@ -604,6 +619,7 @@ async def admin_stats(is_admin: bool = Depends(get_admin_user), db: AsyncSession
         "media_total": total_count,
         "media_photos": photo_count,
         "media_videos": video_count,
+        "media_total_size_gb": round(total_size / (1024**3), 2) if total_size else 0,
         "cpu_percent": cpu_usage,
         "ram_percent": ram.percent,
         "ram_used_gb": round(ram.used / (1024**3), 2),
@@ -634,6 +650,44 @@ async def set_banner(
 
     await db.commit()
     return {"status": "updated"}
+
+@app.get("/admin/schedule")
+async def get_schedule(is_admin: bool = Depends(get_admin_user)):
+    if not is_admin: raise HTTPException(status_code=401)
+    return load_schedule()
+
+@app.post("/admin/schedule")
+async def add_schedule(
+    start: datetime,
+    end: datetime,
+    mode: str,
+    is_admin: bool = Depends(get_admin_user)
+):
+    if not is_admin: raise HTTPException(status_code=401)
+
+    tz = pytz.timezone(settings.EVENT_TIMEZONE)
+    start = tz.localize(start)
+    end = tz.localize(end)
+
+    schedule = load_schedule()
+    schedule.append({"start": start.isoformat(), "end": end.isoformat(), "mode": mode})
+
+    with open("schedule.json", "w") as f:
+        json.dump(schedule, f, indent=2)
+
+    return {"status": "ok"}
+
+@app.delete("/admin/schedule/{index}")
+async def delete_schedule(index: int, is_admin: bool = Depends(get_admin_user)):
+    if not is_admin: raise HTTPException(status_code=401)
+
+    schedule = load_schedule()
+    if 0 <= index < len(schedule):
+        schedule.pop(index)
+        with open("schedule.json", "w") as f:
+            json.dump(schedule, f, indent=2)
+
+    return {"status": "ok"}
 
 @app.post("/admin/media/{media_id}/action")
 async def media_action(
