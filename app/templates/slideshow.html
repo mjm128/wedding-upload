@@ -32,126 +32,29 @@
             color: #fff;
             font-family: var(--header-font);
         }
+        .stats-overlay {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.5);
+            padding: 8px 12px;
+            border-radius: 20px;
+            color: #fff;
+            font-family: sans-serif;
+            font-size: 0.9em;
+            z-index: 1500;
+            backdrop-filter: blur(5px);
+        }
     </style>
 </head>
 <body>
     <div id="banner" class="sticky-banner"></div>
+    <div id="stats-overlay" class="stats-overlay"></div>
 
     <div class="slideshow-container" id="container">
         <!-- Slides -->
     </div>
 
-    <script>
-        // Very basic slideshow logic:
-        // 1. Fetch feed.
-        // 2. Cycle through items.
-        // 3. Refetch when near end or periodically.
-
-        let queue = [];
-        let cursor = null;
-        let currentIndex = -1;
-        let container = document.getElementById('container');
-
-        async function fetchMedia() {
-            let url = '/slideshow/feed?limit=20';
-            if (cursor) url += '&cursor=' + cursor;
-
-            try {
-                const res = await fetch(url);
-                const data = await res.json();
-                if (data.items.length > 0) {
-                    // Preload images?
-                    data.items.forEach(item => {
-                        // Avoid dups if possible, but simpler to just push
-                        queue.push(item);
-                    });
-                    cursor = data.next_cursor; // Wait, API returns oldest as next cursor for pagination...
-                    // Actually for a slideshow we want "NEWEST" or "RANDOM" or just cycle all?
-                    // Typically a wedding slideshow cycles *all* approved media.
-                    // If we want "live", we should poll for *newer* than latest we have.
-                    // Let's adjust logic:
-                    // Just poll /slideshow/feed without cursor to get latest, or with cursor to get older?
-                    // Let's assume the API returns *latest* first.
-                }
-            } catch (e) { console.error(e); }
-        }
-
-        // Let's change strategy: Load *all* (or last 100) and cycle. Then poll for new ones.
-        // The API returns limit 20.
-
-        async function loadInitial() {
-            const res = await fetch('/slideshow/feed?limit=50');
-            const data = await res.json();
-            queue = data.items;
-            nextSlide();
-        }
-
-        function nextSlide() {
-            if (queue.length === 0) {
-                setTimeout(loadInitial, 2000);
-                return;
-            }
-
-            currentIndex = (currentIndex + 1) % queue.length;
-            const item = queue[currentIndex];
-
-            // Create Element
-            const el = document.createElement(item.type === 'video' ? 'video' : 'img');
-            el.src = item.url;
-            el.className = 'slide';
-            if (item.type === 'video') {
-                el.muted = true;
-                el.autoplay = true;
-                el.loop = true; // Loop video for duration of slide? Or play once?
-                // If play once, we need to listen for 'ended'
-            }
-
-            // Clear container
-            container.innerHTML = '';
-            container.appendChild(el);
-
-            // Caption
-            if (item.caption || item.author) {
-                const cap = document.createElement('div');
-                cap.className = 'caption-overlay';
-                cap.innerHTML = `<strong>${item.author || 'Guest'}</strong><br>${item.caption || ''}`;
-                container.appendChild(cap);
-            }
-
-            // Trigger Fade In
-            setTimeout(() => el.classList.add('active'), 50);
-
-            // Schedule next
-            let duration = 5000;
-            if (item.type === 'video') {
-                 // Try to guess duration or default
-                 duration = 10000;
-                 el.onloadedmetadata = () => {
-                     if (el.duration) duration = el.duration * 1000;
-                 };
-                 el.onended = nextSlide;
-            } else {
-                setTimeout(nextSlide, duration);
-            }
-        }
-
-        // Poll for new config/banner
-        setInterval(() => {
-             fetch('/config').then(r => r.json()).then(config => {
-                if (config.banner_message) {
-                    const b = document.getElementById('banner');
-                    b.innerText = config.banner_message;
-                    b.style.display = 'block';
-                } else {
-                    document.getElementById('banner').style.display = 'none';
-                }
-
-                // Also poll for new images to add to queue?
-                // Complex without a "since" timestamp.
-            });
-        }, 30000);
-
-        loadInitial();
-    </script>
+    <script src="/static/js/slideshow.js"></script>
 </body>
 </html>
