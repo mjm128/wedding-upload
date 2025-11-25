@@ -61,10 +61,8 @@ function handleNameSubmit(e) {
     document.cookie = `guest_name=${encodeURIComponent(fullName)}; max-age=31536000; path=/; SameSite=Lax`;
     document.cookie = `table_number=0; max-age=31536000; path=/; SameSite=Lax`;
 
-    // Set UUID
-    if (!getCookie("guest_uuid")) {
-        document.cookie = `guest_uuid=${crypto.randomUUID()}; max-age=31536000; path=/; SameSite=Lax`;
-    }
+    // Force a new UUID on every login to prevent session continuation
+    document.cookie = `guest_uuid=${crypto.randomUUID()}; max-age=31536000; path=/; SameSite=Lax`;
 
     document.getElementById('setup-modal').style.display = 'none';
     updateWelcomeMessage();
