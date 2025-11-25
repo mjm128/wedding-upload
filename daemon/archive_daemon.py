@@ -13,6 +13,9 @@ sys.path.append(os.getcwd())
 
 from app.config import settings
 
+# Ensure directories exist before logging
+os.makedirs(settings.ARCHIVE_DIR, exist_ok=True)
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -153,8 +156,23 @@ def archive_media():
             # Simple curl or requests
             subprocess.run(["curl", "-H", "Content-Type: application/json", "-d", f'{{"content": "Archival Failed: {e}"}}', settings.DISCORD_WEBHOOK_URL])
 
+def check_rclone_config():
+    """Check if rclone config exists and is valid (not empty)."""
+    # Rclone default config path inside container (usually ~/.config/rclone/rclone.conf)
+    # We are mapping to /root/.config/rclone/rclone.conf in docker-compose.yml
+    config_path = "/root/.config/rclone/rclone.conf"
+    if not os.path.exists(config_path):
+        return False
+    if os.path.getsize(config_path) == 0:
+        return False
+    return True
+
 def rclone_copy():
     """Rclone copy /data/archives remote:wedding_backup."""
+    if not check_rclone_config():
+        logger.warning("Rclone config missing or empty. Skipping remote backup.")
+        return
+
     cmd = ["rclone", "copy", settings.ARCHIVE_DIR, f"{settings.RCLONE_REMOTE_NAME}:wedding_backup"]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -173,6 +191,10 @@ def smart_pruning():
 
     if used_gb > settings.MAX_LOCAL_STORAGE_GB:
         logger.warning(f"Disk usage {used_gb:.2f}GB > Limit {settings.MAX_LOCAL_STORAGE_GB}GB. Pruning...")
+
+        if not check_rclone_config():
+            logger.warning("Rclone config missing or empty. Cannot verify remote status. Skipping pruning of ZIPs.")
+            return
 
         # Identify local ZIPs verified as on remote
         # We need to run `rclone lsl remote:wedding_backup` and match?
