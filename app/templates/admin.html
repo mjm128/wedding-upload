@@ -39,19 +39,6 @@
 
             <div style="margin-bottom: 20px;">
                 <h3>Media Moderation</h3>
-                 <div id="filter-bar" style="display:flex; flex-wrap:wrap; gap:15px; margin-bottom:10px; background: var(--glass-bg); padding:10px; border-radius:8px;">
-                    <input type="text" id="media-search" placeholder="Filter by name, caption..." style="flex:2; min-width:200px; padding:8px;" onkeyup="filterMedia()">
-                    <div>
-                        <label><input type="radio" name="filter" value="all" checked onchange="filterMedia()"> All</label>
-                        <label><input type="radio" name="filter" value="starred" onchange="filterMedia()"> Starred</label>
-                        <label><input type="radio" name="filter" value="hidden" onchange="filterMedia()"> Hidden</label>
-                    </div>
-                    <div>
-                        <label><input type="radio" name="type" value="all" checked onchange="filterMedia()"> All Types</label>
-                        <label><input type="radio" name="type" value="image" onchange="filterMedia()"> Photos</label>
-                        <label><input type="radio" name="type" value="video" onchange="filterMedia()"> Videos</label>
-                    </div>
-                </div>
             </div>
 
             <div style="margin-bottom: 20px;">
@@ -67,6 +54,19 @@
 
         <div class="glass-card">
             <h2>Media Moderation</h2>
+            <div id="filter-bar" style="display:flex; flex-wrap:wrap; gap:15px; margin-bottom:10px; background: var(--glass-bg); padding:10px; border-radius:8px;">
+                <input type="text" id="media-search" placeholder="Filter by name, caption..." style="flex:2; min-width:200px; padding:8px;" onkeyup="filterMedia()">
+                <div>
+                    <label><input type="radio" name="filter" value="all" checked onchange="filterMedia()"> All</label>
+                    <label><input type="radio" name="filter" value="starred" onchange="filterMedia()"> Starred</label>
+                    <label><input type="radio" name="filter" value="hidden" onchange="filterMedia()"> Hidden</label>
+                </div>
+                <div>
+                    <label><input type="radio" name="type" value="all" checked onchange="filterMedia()"> All Types</label>
+                    <label><input type="radio" name="type" value="image" onchange="filterMedia()"> Photos</label>
+                    <label><input type="radio" name="type" value="video" onchange="filterMedia()"> Videos</label>
+                </div>
+            </div>
             <div id="media-grid" class="masonry-grid">
                 <!-- Loaded via JS -->
             </div>

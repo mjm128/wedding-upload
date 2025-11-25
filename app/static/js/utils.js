@@ -19,7 +19,8 @@ const TRANSLATIONS = {
         "help_title": "How it Works",
         "help_text": "Select photos or videos from your gallery. Add a caption if you like. Once uploaded, your memories will appear on the live slideshow!",
         "close": "Close",
-        "logout_confirm": "Are you sure you want to logout? You will lose access to your previous uploads history on this device."
+        "logout_confirm": "Are you sure you want to logout? You will lose access to your previous uploads history on this device.",
+        "permanent_action": "I understand this action is permanent."
     },
     "es": {
         "share_memories": "Comparte tus Recuerdos",
@@ -39,7 +40,8 @@ const TRANSLATIONS = {
         "help_title": "Cómo Funciona",
         "help_text": "Selecciona fotos o videos de tu galería. Añade un título si quieres. ¡Una vez subidos, tus recuerdos aparecerán en la presentación en vivo!",
         "close": "Cerrar",
-        "logout_confirm": "¿Estás seguro de que quieres cerrar sesión? Perderás el acceso al historial de tus subidas anteriores en este dispositivo."
+        "logout_confirm": "¿Estás seguro de que quieres cerrar sesión? Perderás el acceso al historial de tus subidas anteriores en este dispositivo.",
+        "permanent_action": "Entiendo que esta acción es permanente."
     }
 };
 
@@ -64,6 +66,14 @@ function setLanguage(lang) {
         const key = el.getAttribute("data-i18n-placeholder");
         el.placeholder = t(key);
     });
+
+    // Handle dynamic elements
+    if (typeof updateWelcomeMessage === 'function') {
+        updateWelcomeMessage();
+    }
+    if (typeof updateBanner === 'function') {
+        updateBanner();
+    }
 }
 
 function toggleLanguage() {
@@ -103,7 +113,7 @@ function showConfirm(message, onConfirm, requireCheck = false) {
             <div class="glass-card" style="max-width: 300px; text-align: center;">
                 <p id="${modalId}-msg" style="margin-bottom: 20px;"></p>
                 <div id="${modalId}-check-container" style="margin-bottom: 15px; display:none; text-align:left; font-size:0.9em;">
-                    <label><input type="checkbox" id="${modalId}-check"> I understand this action is permanent.</label>
+                    <label><input type="checkbox" id="${modalId}-check"> <span data-i18n="permanent_action">I understand this action is permanent.</span></label>
                 </div>
                 <button id="${modalId}-yes" class="btn" style="margin-right: 10px;"></button>
                 <button id="${modalId}-no" class="btn btn-secondary"></button>
@@ -115,6 +125,8 @@ function showConfirm(message, onConfirm, requireCheck = false) {
     document.getElementById(`${modalId}-msg`).innerText = message;
     document.getElementById(`${modalId}-yes`).innerText = t('yes');
     document.getElementById(`${modalId}-no`).innerText = t('no');
+    modal.querySelector('[data-i18n="permanent_action"]').innerText = t('permanent_action');
+
 
     const checkContainer = document.getElementById(`${modalId}-check-container`);
     const checkBox = document.getElementById(`${modalId}-check`);
@@ -205,4 +217,46 @@ function logout() {
         document.cookie = "table_number=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
         location.reload();
     }, true); // Require checkbox
+}
+
+function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return decodeURIComponent(parts.pop().split(';').shift());
+}
+
+function updateWelcomeMessage() {
+    const name = getCookie("guest_name");
+    if (!name) {
+        document.getElementById('setup-modal').style.display = 'flex';
+    } else {
+        const display = name.split('-').reverse().join(', ');
+        const welcome = document.getElementById('guest-welcome');
+        welcome.innerText = t('welcome').replace('{name}', display);
+
+        // Ensure UUID exists
+        if (!getCookie("guest_uuid")) {
+            document.cookie = `guest_uuid=${crypto.randomUUID()}; max-age=31536000; path=/; SameSite=Lax`;
+        }
+    }
+}
+
+function toLocalTime(utcDateStr) {
+    const date = new Date(utcDateStr);
+    return date.toLocaleString();
+}
+
+function updateBanner() {
+    if (window.APP_CONFIG) {
+        const bannerMsg = window.APP_CONFIG[`banner_message_${currentLang}`] || window.APP_CONFIG[`banner_message_en`];
+        if (bannerMsg) {
+            const b = document.getElementById('banner');
+            b.innerText = bannerMsg;
+            b.style.display = 'block';
+            document.body.classList.add('has-banner');
+        } else {
+            document.getElementById('banner').style.display = 'none';
+            document.body.classList.remove('has-banner');
+        }
+    }
 }
