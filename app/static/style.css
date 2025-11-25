@@ -18,6 +18,11 @@
     --glass-border: #dcdfe3;
 }
 
+body.content-hidden .container,
+body.content-hidden .top-toolbar {
+    display: none;
+}
+
 body {
     background-color: var(--bg-color);
     color: var(--text-color);
@@ -94,6 +99,9 @@ h1, h2, h3 {
     top: 0;
     z-index: 1000;
     display: none; /* Hidden by default */
+    white-space: normal;
+    max-height: 100px;
+    overflow-y: auto;
 }
 
 /* Toast / Snackbar */
@@ -156,6 +164,7 @@ h1, h2, h3 {
     height: auto;
     border-radius: 12px;
     display: block;
+    object-fit: contain;
 }
 
 /* Upload Progress */
@@ -179,6 +188,20 @@ h1, h2, h3 {
 /* Caption Input Fix */
 #caption {
     box-sizing: border-box;
+    resize: vertical;
+    min-height: 50px; /* Default height for ~2 lines */
+    width: 100%;
+    margin-top: 10px;
+    padding: 10px;
+    border-radius: 5px;
+    border: none;
+    font-family: var(--font-family); /* Inherit font */
+    background-color: var(--glass-bg);
+    color: var(--text-color);
+}
+
+[data-theme="light"] #caption {
+    border: 1px solid var(--glass-border);
 }
 
 /* Top Toolbar */

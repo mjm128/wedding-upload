@@ -357,6 +357,7 @@ async def slideshow_feed(
     admin_mode: bool = False,
     filter: Optional[str] = None,
     type: Optional[str] = None,
+    order: str = "random",
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -366,18 +367,24 @@ async def slideshow_feed(
     query = select(Media)
     if not admin_mode:
         query = query.where(Media.is_hidden == False)
-        # Biased Sorting for slideshow
-        now = datetime.now(pytz.utc)
-        age_hours = (now - Media.created_at) / timedelta(hours=1)
+        if order == "newest":
+            query = query.order_by(desc(Media.created_at), desc(Media.id))
+        else:
+            # Biased Sorting for slideshow
+            now = datetime.now(pytz.utc)
+            age_minutes = (now - Media.created_at) / timedelta(minutes=1)
 
-        # Score: Starred items get a huge boost. Newer items get a boost. Less viewed items get a boost.
-        score = (
-            (func.cast(Media.is_starred, Integer) * 1000) +
-            (100 / (age_hours + 1)) +
-            (10 / (Media.view_count + 1))
-        ).label("score")
+            # Score: Starred items get a huge boost. Newer items get a boost. Less viewed items get a boost.
+            # - Starred media gets a massive 10,000 point bonus.
+            # - A freshness score that decays over time (5000 points initially, drops quickly).
+            # - A small bonus for items with fewer views.
+            score = (
+                (func.cast(Media.is_starred, Integer) * 10000) +
+                (5000 / (age_minutes + 10)) +
+                (50 / (Media.view_count + 1))
+            ).label("score")
 
-        query = query.order_by(desc(score))
+            query = query.order_by(desc(score))
     else:
         # Admin view gets chronological
         query = query.order_by(desc(Media.created_at), desc(Media.id))
@@ -430,7 +437,9 @@ async def slideshow_feed(
             "created_at": m.created_at.isoformat(),
             "is_starred": m.is_starred,
             "file_size": m.file_size_bytes,
-            "is_hidden": m.is_hidden
+            "is_hidden": m.is_hidden,
+            "filename": m.filename,
+            "original_filename": m.original_filename
         })
 
     next_cursor = f"{data[-1]['created_at']}_{data[-1]['id']}" if data else None

@@ -213,7 +213,9 @@ function showHelp() {
 
 function logout() {
     showConfirm(t('logout_confirm'), () => {
+        // Clear all relevant cookies
         document.cookie = "guest_name=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+        document.cookie = "guest_uuid=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
         document.cookie = "table_number=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
         location.reload();
     }, true); // Require checkbox
@@ -229,14 +231,17 @@ function updateWelcomeMessage() {
     const name = getCookie("guest_name");
     if (!name) {
         document.getElementById('setup-modal').style.display = 'flex';
+        document.body.classList.add('content-hidden');
     } else {
+        document.body.classList.remove('content-hidden');
         const display = name.split('-').reverse().join(', ');
         const welcome = document.getElementById('guest-welcome');
         welcome.innerText = t('welcome').replace('{name}', display);
 
-        // Ensure UUID exists
+        // Ensure UUID exists (should be set on login)
         if (!getCookie("guest_uuid")) {
-            document.cookie = `guest_uuid=${crypto.randomUUID()}; max-age=31536000; path=/; SameSite=Lax`;
+            console.error("Missing UUID despite being logged in. Re-logging in.");
+            logout();
         }
     }
 }

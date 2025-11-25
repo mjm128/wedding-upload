@@ -102,7 +102,7 @@ async function loadMedia() {
         div.className = 'grid-item';
         div.innerHTML = `
             <div class="glass-card" style="padding: 10px;">
-                <div style="font-size:0.7em; color:#aaa; margin-bottom:5px;">UUID: ${item.filename.split('/').pop().split('.')[0]}</div>
+                <div style="font-size:0.7em; color:#aaa; margin-bottom:5px;">UUID: ${item.filename.split('/').pop().split('.')[0]}<br>Original: ${item.original_filename}</div>
                 ${item.type === 'video' ? '<span style="color:gold; font-weight:bold;">[VIDEO]</span>' : ''}
                 <img src="${item.thumbnail || item.url}" class="media-content ${item.is_hidden ? 'hidden-media' : ''} ${item.is_starred ? 'starred-media' : ''}" loading="lazy">
                 <p><strong>${item.author || 'Guest'}</strong><br>${item.caption || ''}</p>

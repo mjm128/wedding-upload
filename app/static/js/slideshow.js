@@ -5,18 +5,29 @@ let currentIndex = -1;
 let container = document.getElementById('container');
 let cursor = null; // Timestamp for pagination/newest
 let isFetching = false;
+let currentOrder = 'random'; // 'random' or 'newest'
+let nextSlideTimer = null;
 
 // --- Init ---
 document.addEventListener('DOMContentLoaded', () => {
+    if (localStorage.getItem("theme") === "light") {
+        document.documentElement.setAttribute("data-theme", "light");
+    }
     loadInitial();
-
-    // Config poller
     setInterval(pollConfig, 30000);
-
-    // Stats poller
     pollStats();
     setInterval(pollStats, 60000);
 });
+
+function toggleOrder() {
+    currentOrder = currentOrder === 'random' ? 'newest' : 'random';
+    const btn = document.getElementById('order-toggle');
+    btn.innerHTML = currentOrder === 'random' ? '🎲' : '🕒'; // Dice for random, clock for newest
+
+    // Reset and reload
+    if (nextSlideTimer) clearTimeout(nextSlideTimer);
+    loadInitial(); // Reloads with the new order
+}
 
 async function pollConfig() {
      fetch('/config').then(r => r.json()).then(config => {
@@ -48,9 +59,15 @@ async function pollStats() {
 // --- Media Fetching ---
 
 async function loadInitial() {
+    // Reset state
+    queue = [];
+    currentIndex = -1;
+    container.innerHTML = '';
+    isFetching = false;
+
     // Load existing media (limit 50)
     try {
-        const res = await fetch('/slideshow/feed?limit=50');
+        const res = await fetch(`/slideshow/feed?limit=50&order=${currentOrder}`);
         const data = await res.json();
         queue = data.items;
 
@@ -80,7 +97,7 @@ async function fetchMore() {
     // So we can check if the newest item ID is already in our queue.
 
     try {
-        const res = await fetch('/slideshow/feed?limit=20');
+        const res = await fetch(`/slideshow/feed?limit=20&order=${currentOrder}`);
         const data = await res.json();
         const newItems = data.items;
 
