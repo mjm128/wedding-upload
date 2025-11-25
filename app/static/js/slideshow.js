@@ -104,6 +104,11 @@ async function fetchMore() {
 
 // --- Playback Logic ---
 
+const TRANSITIONS = ['fade', 'slide', 'zoom'];
+function getRandomTransition() {
+    return TRANSITIONS[Math.floor(Math.random() * TRANSITIONS.length)];
+}
+
 function nextSlide() {
     if (queue.length === 0) {
         setTimeout(loadInitial, 2000);
@@ -132,63 +137,44 @@ function nextSlide() {
         el.muted = true;
         el.autoplay = true;
         el.playsInline = true;
-
-        // Error handling for video
-        el.onerror = () => {
-             console.error("Video failed to load", item.url);
-             nextSlide();
-        };
+        el.onerror = () => { console.error("Video failed", item.url); nextSlide(); };
     } else {
-        el.classList.add('ken-burns');
-        el.onload = () => {
-            // Ready
-        };
         el.onerror = () => {
-            console.error("Image failed to load", item.url);
-            // Remove bad item from queue?
+            console.error("Image failed", item.url);
             queue.splice(currentIndex, 1);
-            currentIndex--; // step back
+            currentIndex--;
             nextSlide();
         }
     }
 
-    // Clear container (keep old one for crossfade? CSS handles opacity)
-    // For simple crossfade: append new, fade in, remove old after delay.
-    // Current CSS: .slide.active { opacity: 1 }
-    // We need to keep the OLD slide for a second.
-
     const oldSlide = container.querySelector('.slide.active');
-    container.appendChild(el); // Add new one (opacity 0)
+    container.appendChild(el);
 
     // Caption
-    // Remove old caption
     const oldCap = container.querySelector('.caption-overlay');
     if (oldCap) oldCap.remove();
-
     if (item.caption || item.author) {
         const cap = document.createElement('div');
         cap.className = 'caption-overlay';
-        let author = item.author || 'Guest';
-        // Format "Last-First" to "First Last" or "Last, First"?
-        // User asked: "replace the '-' with ', ' so that it is Last Name, First name format."
-        if (author.includes('-')) {
-            author = author.split('-').join(', ');
-        }
+        let author = (item.author || 'Guest').split('-').join(', ');
         cap.innerHTML = `<strong>${author}</strong><br>${item.caption || ''}`;
         container.appendChild(cap);
     }
 
-    // Trigger Fade In
-    // Force reflow
+    // Apply Random Transition
+    const transition = getRandomTransition();
+    el.classList.add(`transition-${transition}`);
+
     requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
         el.classList.add('active');
+      });
     });
 
-
-    // Remove old slide after transition
     if (oldSlide) {
+        const transitionDuration = 1500; // ms
         oldSlide.classList.remove('active');
-        setTimeout(() => oldSlide.remove(), 1000); // 1s matches CSS transition
+        setTimeout(() => oldSlide.remove(), transitionDuration);
     }
 
     // Schedule next

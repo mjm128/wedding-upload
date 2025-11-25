@@ -78,36 +78,65 @@ def load_schedule():
         logger.error(f"Error loading schedule: {e}")
         return []
 
+def load_schedule():
+    schedule_path = "schedule.json"
+    if not os.path.exists(schedule_path):
+        return []
+    try:
+        with open(schedule_path, "r") as f:
+            schedule = json.load(f)
+            # Sort by start time to make processing easier
+            schedule.sort(key=lambda x: x.get("start", ""))
+            return schedule
+    except Exception as e:
+        logger.error(f"Error loading or sorting schedule: {e}")
+        return []
+
 def check_schedule_mode():
     """
-    Returns the current mode based on schedule.json.
-    Modes: 'standard', 'blackout', 'unlimited'
+    Returns the current mode, a message, and time remaining to next state change.
     """
     now = get_current_time_in_zone()
     schedule = load_schedule()
 
-    current_mode = "standard" # Default
+    # Defaults
+    current_mode = "standard"
+    message = ""
+    remaining_seconds = None
 
-    # Simple time comparison (assuming HH:MM format in schedule for current day,
-    # or more complex logic if schedule has dates.
-    # The README implies "Time Blocks". Let's assume a list of start/end/mode.
-    # For simplicity, we will assume schedule objects have "start", "end", "mode"
-    # where start/end are ISO strings or just time strings?
-    # Let's assume ISO strings for full date support as it's a wedding event.
-
-    for block in schedule:
+    for i, block in enumerate(schedule):
         try:
             start = datetime.fromisoformat(block["start"]).astimezone(pytz.timezone(settings.EVENT_TIMEZONE))
             end = datetime.fromisoformat(block["end"]).astimezone(pytz.timezone(settings.EVENT_TIMEZONE))
 
-            if start <= now <= end:
+            if start <= now < end:
                 current_mode = block.get("mode", "standard")
-                break
-        except ValueError:
-            # Maybe it's just HH:MM for "today"? Let's stick to ISO for robustness as requested.
-            pass
+                message = block.get("message", "")
+                remaining_seconds = (end - now).total_seconds()
+                return {
+                    "mode": current_mode,
+                    "message": message,
+                    "remaining_seconds": remaining_seconds
+                }
+            elif now < start:
+                # We are before the next block
+                remaining_seconds = (start - now).total_seconds()
+                # The message here could be about what's coming up, or nothing.
+                # For now, we are in "standard" mode until this block starts.
+                return {
+                    "mode": "standard",
+                    "message": "",
+                    "remaining_seconds": remaining_seconds
+                }
+        except (ValueError, KeyError):
+            continue
 
-    return current_mode
+    # If we are past all scheduled blocks
+    return {
+        "mode": "standard", # Or 'unlimited' if that's the desired default post-event
+        "message": "",
+        "remaining_seconds": None
+    }
 
 async def generate_thumbnail(file_path: str, mime_type: str) -> Optional[str]:
     """Generates a thumbnail and returns the filename relative to UPLOAD_DIR."""
@@ -200,13 +229,16 @@ async def get_frontend_config(db: AsyncSession = Depends(get_db)):
     keys = ["GLOBAL_BANNER_MESSAGE_EN", "GLOBAL_BANNER_MESSAGE_ES"]
     result = await db.execute(select(AppConfig).where(AppConfig.key.in_(keys)))
     banners = {c.key: c.value for c in result.scalars()}
+    schedule_info = check_schedule_mode()
 
     return {
         "banner_message_en": banners.get("GLOBAL_BANNER_MESSAGE_EN"),
         "banner_message_es": banners.get("GLOBAL_BANNER_MESSAGE_ES"),
         "max_file_size_mb": settings.MAX_MEDIA_SIZE_MB,
         "max_video_duration_sec": settings.MAX_VIDEO_DURATION_SEC,
-        "mode": check_schedule_mode(),
+        "mode": schedule_info.get("mode", "standard"),
+        "schedule_message": schedule_info.get("message", ""),
+        "schedule_remaining_seconds": schedule_info.get("remaining_seconds"),
         "post_upload_url": settings.POST_UPLOAD_ACTION_URL,
         "post_upload_label": settings.POST_UPLOAD_ACTION_LABEL
     }
@@ -219,9 +251,10 @@ async def upload_media(
     guest_info: dict = Depends(get_current_guest),
     db: AsyncSession = Depends(get_db)
 ):
-    mode = check_schedule_mode()
-    if mode == "blackout":
-        raise HTTPException(status_code=403, detail="Uploads are currently paused.")
+    schedule_info = check_schedule_mode()
+    if schedule_info.get("mode") == "blackout":
+        detail_message = schedule_info.get("message") or "Uploads are currently paused."
+        raise HTTPException(status_code=403, detail=detail_message)
 
     # 1. Validation
     # We can't easily validate size before streaming without relying on Content-Length header, which can be spoofed.

@@ -3,6 +3,11 @@
 document.addEventListener('DOMContentLoaded', () => {
     loadStats();
     loadMedia();
+    window.addEventListener('scroll', () => {
+        if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) {
+            loadMedia();
+        }
+    });
 });
 
 // Fetch Stats
@@ -73,22 +78,75 @@ fetch('/config').then(r => r.json()).then(c => {
     updateCurrentBanner('es', c.banner_message_es);
 });
 
+// Schedule
+async function loadSchedule() {
+    const res = await fetch('/admin/schedule');
+    const schedule = await res.json();
+    const list = document.getElementById('schedule-list');
+    list.innerHTML = '';
+    schedule.forEach((item, index) => {
+        const div = document.createElement('div');
+        div.innerHTML = `
+            <span>${new Date(item.start).toLocaleString()} - ${new Date(item.end).toLocaleString()}: ${item.mode}</span>
+            <button onclick="deleteSchedule(${index})">Delete</button>
+        `;
+        list.appendChild(div);
+    });
+}
+
+async function addSchedule() {
+    const start = document.getElementById('schedule-start').value;
+    const end = document.getElementById('schedule-end').value;
+    const mode = document.getElementById('schedule-mode').value;
+    const message = document.getElementById('schedule-message').value;
+
+    if (!start || !end) {
+        showToast("Please select a start and end time.");
+        return;
+    }
+
+    const res = await fetch(`/admin/schedule?start=${start}&end=${end}&mode=${mode}&message=${message}`, { method: 'POST' });
+    if (res.ok) {
+        loadSchedule();
+    } else {
+        showToast("Failed to add schedule.");
+    }
+}
+
+async function deleteSchedule(index) {
+    const res = await fetch(`/admin/schedule/${index}`, { method: 'DELETE' });
+    if (res.ok) {
+        loadSchedule();
+    } else {
+        showToast("Failed to delete schedule.");
+    }
+}
+
+document.addEventListener('DOMContentLoaded', loadSchedule);
+
 // Media
 let cursor = null;
+let isLoading = false;
 
-async function loadMedia() {
+async function loadMedia(reset = false) {
+    if (isLoading) return;
+    if (reset) {
+        cursor = null;
+    }
     const query = document.getElementById('media-search').value;
     const filter = document.querySelector('input[name="filter"]:checked').value;
     const type = document.querySelector('input[name="type"]:checked').value;
 
-    let url = `/slideshow/feed?limit=20&admin_mode=true`;
+    let url = `/slideshow/feed?limit=6&admin_mode=true`;
     if (cursor) url += `&cursor=${cursor}`;
     if (query) url += `&q=${encodeURIComponent(query)}`;
     if (filter !== 'all') url += `&filter=${filter}`;
     if (type !== 'all') url += `&type=${type}`;
 
+    isLoading = true;
     const res = await fetch(url);
     const data = await res.json();
+    isLoading = false;
 
     const grid = document.getElementById('media-grid');
 
@@ -124,9 +182,8 @@ async function loadMedia() {
         // Fix: Only update cursor if the new items provide a new cursor (older items)
         // The backend returns next_cursor as the created_at of the LAST item.
         cursor = data.next_cursor;
-        document.getElementById('load-more-btn').style.display = 'block';
     } else {
-        document.getElementById('load-more-btn').style.display = 'none';
+        // No more items to load
     }
 }
 
