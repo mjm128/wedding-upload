@@ -322,6 +322,12 @@ async def upload_media(
         while chunk := await f.read(1024*1024):
             check_hash.update(chunk)
 
+def save_schedule(schedule: list):
+    # Sort by start time before saving
+    schedule.sort(key=lambda x: x.get("start", ""))
+    with open("schedule.json", "w") as f:
+        json.dump(schedule, f, indent=4)
+
     if check_hash.hexdigest() != file_hash:
         os.remove(file_path)
         raise HTTPException(status_code=500, detail="Integrity check failed.")
@@ -388,6 +394,7 @@ async def slideshow_feed(
     q: Optional[str] = None,
     limit: int = 20,
     admin_mode: bool = False,
+    order: str = 'random', # 'random' or 'newest'
     filter: Optional[str] = None,
     type: Optional[str] = None,
     db: AsyncSession = Depends(get_db)
@@ -397,22 +404,25 @@ async def slideshow_feed(
     Cursor is a timestamp (ISO string).
     """
     query = select(Media)
+
     if not admin_mode:
         query = query.where(Media.is_hidden == False)
-        # Biased Sorting for slideshow
-        now = datetime.now(pytz.utc)
-        age_hours = (now - Media.created_at) / timedelta(hours=1)
+        if order == 'random':
+            # Biased Sorting for slideshow
+            now = datetime.now(pytz.utc)
+            age_in_minutes = func.julianday('now') * 24 * 60 - func.julianday(Media.created_at) * 24 * 60
 
-        # Score: Starred items get a huge boost. Newer items get a boost. Less viewed items get a boost.
-        score = (
-            (func.cast(Media.is_starred, Integer) * 1000) +
-            (100 / (age_hours + 1)) +
-            (10 / (Media.view_count + 1))
-        ).label("score")
-
-        query = query.order_by(desc(score))
+            # Score: Starred items get a huge boost. Very new items (last 5 min) get a boost.
+            score = (
+                (func.cast(Media.is_starred, Integer) * 1000) +
+                func.iif(age_in_minutes < 5, 500, 0) +
+                (100 / (age_in_minutes + 10))
+            ).label("score")
+            query = query.order_by(desc(score))
+        else: # newest
+            query = query.order_by(desc(Media.created_at), desc(Media.id))
     else:
-        # Admin view gets chronological
+        # Admin view always gets chronological
         query = query.order_by(desc(Media.created_at), desc(Media.id))
 
     if filter == "starred":
@@ -463,7 +473,9 @@ async def slideshow_feed(
             "created_at": m.created_at.isoformat(),
             "is_starred": m.is_starred,
             "file_size": m.file_size_bytes,
-            "is_hidden": m.is_hidden
+            "is_hidden": m.is_hidden,
+            "filename": m.filename,
+            "original_filename": m.original_filename
         })
 
     next_cursor = f"{data[-1]['created_at']}_{data[-1]['id']}" if data else None
@@ -586,6 +598,66 @@ async def admin_login_pass(password: str = Form(...)):
         resp.set_cookie(key="admin_token", value=settings.ADMIN_MAGIC_TOKEN, httponly=True)
         return resp
     return HTMLResponse("Invalid password", status_code=401)
+
+# --- Admin Schedule ---
+
+@app.get("/admin/schedule")
+async def get_schedule(is_admin: bool = Depends(get_admin_user)):
+    if not is_admin: raise HTTPException(status_code=401)
+    return load_schedule()
+
+@app.post("/admin/schedule")
+async def add_schedule_block(
+    start: str, end: str, mode: str, message: Optional[str] = None,
+    is_admin: bool = Depends(get_admin_user)
+):
+    if not is_admin: raise HTTPException(status_code=401)
+
+    # Validate
+    try:
+        # The frontend sends datetime-local, which is ISO format without timezone
+        # We need to assume it's in the event's timezone
+        tz = pytz.timezone(settings.EVENT_TIMEZONE)
+        start_dt = tz.localize(datetime.fromisoformat(start))
+        end_dt = tz.localize(datetime.fromisoformat(end))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid datetime format")
+
+    new_block = {
+        "start": start_dt.isoformat(),
+        "end": end_dt.isoformat(),
+        "mode": mode,
+        "message": message or ""
+    }
+
+    schedule = load_schedule()
+    schedule.append(new_block)
+    save_schedule(schedule)
+    return {"status": "ok"}
+
+@app.put("/admin/schedule/{index}")
+async def update_schedule_block(
+    index: int, message: str,
+    is_admin: bool = Depends(get_admin_user)
+):
+    if not is_admin: raise HTTPException(status_code=401)
+    schedule = load_schedule()
+    if 0 <= index < len(schedule):
+        schedule[index]['message'] = message
+        save_schedule(schedule)
+        return {"status": "ok"}
+    raise HTTPException(status_code=404, detail="Schedule block not found")
+
+@app.delete("/admin/schedule/{index}")
+async def delete_schedule_block(index: int, is_admin: bool = Depends(get_admin_user)):
+    if not is_admin: raise HTTPException(status_code=401)
+    schedule = load_schedule()
+    if 0 <= index < len(schedule):
+        schedule.pop(index)
+        save_schedule(schedule)
+        return {"status": "ok"}
+    raise HTTPException(status_code=404, detail="Schedule block not found")
+
 
 @app.get("/admin/stats")
 async def admin_stats(is_admin: bool = Depends(get_admin_user), db: AsyncSession = Depends(get_db)):

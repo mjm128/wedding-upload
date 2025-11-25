@@ -83,12 +83,30 @@ async function loadSchedule() {
     const res = await fetch('/admin/schedule');
     const schedule = await res.json();
     const list = document.getElementById('schedule-list');
-    list.innerHTML = '';
+    list.innerHTML = '<h4>Current Schedule</h4>';
+
+    if (schedule.length === 0) {
+        list.innerHTML += '<p>No schedule blocks defined.</p>';
+        return;
+    }
+
     schedule.forEach((item, index) => {
         const div = document.createElement('div');
+        div.className = 'schedule-item glass-card';
+        div.style.padding = '10px';
+        div.style.marginBottom = '10px';
         div.innerHTML = `
-            <span>${new Date(item.start).toLocaleString()} - ${new Date(item.end).toLocaleString()}: ${item.mode}</span>
-            <button onclick="deleteSchedule(${index})">Delete</button>
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                <div>
+                    <strong>${item.mode.toUpperCase()}</strong><br>
+                    <small>${new Date(item.start).toLocaleString()} to ${new Date(item.end).toLocaleString()}</small>
+                </div>
+                <input type="text" id="schedule-msg-${index}" value="${item.message || ''}" placeholder="Custom message" style="flex:1;">
+                <div>
+                    <button class="btn" style="padding:5px 10px;" onclick="updateSchedule(${index})">Update</button>
+                    <button class="btn-secondary" style="padding:5px 10px; color:red; border-color:red;" onclick="deleteSchedule(${index})">Delete</button>
+                </div>
+            </div>
         `;
         list.appendChild(div);
     });
@@ -105,21 +123,38 @@ async function addSchedule() {
         return;
     }
 
-    const res = await fetch(`/admin/schedule?start=${start}&end=${end}&mode=${mode}&message=${message}`, { method: 'POST' });
+    const res = await fetch(`/admin/schedule?start=${start}&end=${end}&mode=${mode}&message=${encodeURIComponent(message)}`, { method: 'POST' });
     if (res.ok) {
         loadSchedule();
+        // Clear inputs
+        document.getElementById('schedule-start').value = '';
+        document.getElementById('schedule-end').value = '';
+        document.getElementById('schedule-message').value = '';
     } else {
         showToast("Failed to add schedule.");
     }
 }
 
-async function deleteSchedule(index) {
-    const res = await fetch(`/admin/schedule/${index}`, { method: 'DELETE' });
+async function updateSchedule(index) {
+    const message = document.getElementById(`schedule-msg-${index}`).value;
+    const res = await fetch(`/admin/schedule/${index}?message=${encodeURIComponent(message)}`, { method: 'PUT' });
     if (res.ok) {
+        showToast("Schedule updated!");
         loadSchedule();
     } else {
-        showToast("Failed to delete schedule.");
+        showToast("Failed to update schedule.");
     }
+}
+
+async function deleteSchedule(index) {
+    showConfirm("Are you sure you want to delete this schedule block?", async () => {
+        const res = await fetch(`/admin/schedule/${index}`, { method: 'DELETE' });
+        if (res.ok) {
+            loadSchedule();
+        } else {
+            showToast("Failed to delete schedule.");
+        }
+    });
 }
 
 document.addEventListener('DOMContentLoaded', loadSchedule);
