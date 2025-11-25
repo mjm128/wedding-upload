@@ -3,37 +3,36 @@ import pytest
 from fastapi.testclient import TestClient
 import uuid
 import shutil
+import io
+from PIL import Image
 
-# Mock environment before importing app
-os.environ["UPLOAD_DIR"] = "/tmp/test_uploads_folder"
-os.environ["THUMBNAIL_DIR"] = "/tmp/test_thumbnails_folder"
-os.environ["ARCHIVE_DIR"] = "/tmp/test_archives_folder"
-os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+def create_dummy_image(filename="test.png"):
+    """Creates a small dummy image file, returns a file tuple for httpx."""
+    img = Image.new('RGB', (1, 1), color='red')
+    img_byte_arr = io.BytesIO()
+    img.save(img_byte_arr, format='PNG')
+    img_byte_arr.seek(0)
+    return (filename, img_byte_arr, 'image/png')
 
-# Ensure dirs exist
-os.makedirs(os.environ["UPLOAD_DIR"], exist_ok=True)
-os.makedirs(os.environ["THUMBNAIL_DIR"], exist_ok=True)
-os.makedirs(os.environ["ARCHIVE_DIR"], exist_ok=True)
-
-from app.main import app
-from app.config import settings
-
-@pytest.fixture(scope="module", autouse=True)
-def setup_db():
+@pytest.fixture(scope="module")
+def client():
+    from app.main import app
+    from fastapi.testclient import TestClient
     with TestClient(app) as c:
         yield c
 
-def test_upload_folder_structure(setup_db):
-    client = setup_db
-    content = f"fake image {uuid.uuid4()}".encode()
+def test_upload_folder_structure(client):
+    # Use a real image
+    dummy_image = create_dummy_image("test_folder.png")
 
     # Set cookie
     client.cookies.set("guest_name", "FolderTestUser")
     client.cookies.set("table_number", "1")
+    client.cookies.set("guest_uuid", str(uuid.uuid4()))
 
     # Upload
     response = client.post("/upload",
-        files={"file": ("test_folder.jpg", content, "image/jpeg")},
+        files={"file": dummy_image},
         data={"caption": "Folder Caption"}
     )
     assert response.status_code == 200
@@ -46,8 +45,8 @@ def test_upload_folder_structure(setup_db):
         path = os.path.join(upload_dir, name)
         if os.path.isdir(path) and "FolderTestUser" in name:
             found_folder = True
-            # Verify file is inside (filename is uuid, so check for any .jpg)
-            files = [f for f in os.listdir(path) if f.endswith(".jpg")]
+            # Verify file is inside (filename is uuid, so check for any .png)
+            files = [f for f in os.listdir(path) if f.endswith(".png")]
             assert len(files) > 0
             break
 

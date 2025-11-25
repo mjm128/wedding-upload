@@ -39,6 +39,15 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+        # Check if guest_uuid column exists and add it if not.
+        # This is a simple migration solution.
+        try:
+            await conn.execute(text("SELECT guest_uuid FROM media LIMIT 1;"))
+        except:
+            await conn.execute(text("ALTER TABLE media ADD COLUMN guest_uuid VARCHAR;"))
+            await conn.execute(text("CREATE INDEX ix_media_guest_uuid ON media (guest_uuid);"))
+
+
         # Enable WAL mode for SQLite
         if "sqlite" in settings.DATABASE_URL:
             await conn.execute(text("PRAGMA journal_mode=WAL;"))

@@ -166,9 +166,7 @@ def archive_media():
 
 def check_rclone_config():
     """Check if rclone config exists and is valid (not empty)."""
-    # Rclone default config path inside container (usually ~/.config/rclone/rclone.conf)
-    # We are mapping to /root/.config/rclone/rclone.conf in docker-compose.yml
-    config_path = "/root/.config/rclone/rclone.conf"
+    config_path = os.environ.get("RCLONE_CONFIG", "/root/.config/rclone/rclone.conf")
     if not os.path.exists(config_path):
         return False
     if os.path.getsize(config_path) == 0:
@@ -205,7 +203,7 @@ def rclone_copy():
     except Exception as e:
         logger.error(f"Rclone execution error: {e}")
 
-def smart_pruning():
+def smart_pruning(verify_remote=True):
     """Prune oldest ZIPs if disk usage > MAX_LOCAL_STORAGE_GB."""
     # Check total disk usage of the volume containing ARCHIVE_DIR
     total, used, free = shutil.disk_usage(settings.ARCHIVE_DIR)
@@ -214,7 +212,7 @@ def smart_pruning():
     if used_gb > settings.MAX_LOCAL_STORAGE_GB:
         logger.warning(f"Disk usage {used_gb:.2f}GB > Limit {settings.MAX_LOCAL_STORAGE_GB}GB. Pruning...")
 
-        if not check_rclone_config():
+        if verify_remote and not check_rclone_config():
             logger.warning("Rclone config missing or empty. Cannot verify remote status. Skipping pruning of ZIPs.")
             return
 
@@ -228,60 +226,47 @@ def smart_pruning():
         zips = [os.path.join(settings.ARCHIVE_DIR, f) for f in os.listdir(settings.ARCHIVE_DIR) if f.endswith('.zip')]
         zips.sort(key=os.path.getmtime) # Oldest first
 
-        for z in zips:
-            # Verify it's on remote (Optional, but safer)
-            # cmd = ["rclone", "lsf", f"{settings.RCLONE_REMOTE_NAME}:wedding_backup/{os.path.basename(z)}"]
-            # For speed, we might skip or trust the previous copy step.
-            # But requirements say: "Identify local ZIPs verified as 'on remote'"
+        while used_gb > settings.MAX_LOCAL_STORAGE_GB:
+            zips = [os.path.join(settings.ARCHIVE_DIR, f) for f in os.listdir(settings.ARCHIVE_DIR) if f.endswith('.zip')]
+            zips.sort(key=os.path.getmtime) # Oldest first
 
-            check_cmd = ["rclone", "lsjson", f"{settings.RCLONE_REMOTE_NAME}:wedding_backup/{os.path.basename(z)}"]
-            res = subprocess.run(check_cmd, capture_output=True, text=True)
-            if res.returncode == 0 and res.stdout.strip() != "[]":
-                # Exists on remote
-                logger.info(f"Deleting verified archive: {z}")
-                os.remove(z)
+            if not zips:
+                logger.warning("No more zips to prune, but disk usage is still high.")
+                break
 
-                # Logic to purge source upload folders if they were in this archive?
-                # It's hard to link zip content back to source folders without inspecting the zip.
-                # But we can rely on "Age". If an archive was created and verified, folders OLDER than it can be purged?
-                # Or we implement a simpler logic:
-                # 1. Archive created (batch_TS.zip).
-                # 2. Rclone copied.
-                # 3. If verified, we can delete the SOURCE folders that went into it.
-                # But we lost that list.
-                # Alternative: "Prune Uploads" logic separately.
+            z = zips.pop(0) # Get the oldest zip
 
-                # IMPLEMENTATION:
-                # Since we want to delete uploads AFTER sync, we should do it here or in rclone_copy success.
-                # But rclone_copy just copies ARCHIVE_DIR.
-                # Ideally, after we zip folders, we delete them?
-                # No, we wait for sync.
+            if verify_remote:
+                check_cmd = ["rclone", "lsjson", f"{settings.RCLONE_REMOTE_NAME}:wedding_backup/{os.path.basename(z)}"]
+                res = subprocess.run(check_cmd, capture_output=True, text=True)
+                if res.returncode != 0 or res.stdout.strip() == "[]":
+                    logger.warning(f"Skipping {z} - not found on remote.")
+                    continue
 
-                # Let's check if we can verify the ZIP is on remote, then open the ZIP, read filenames (folders), and delete them from UPLOAD_DIR.
+            # Exists on remote (or verification skipped)
+            logger.info(f"Deleting archive: {z}")
+            os.remove(z)
 
-                try:
-                    with zipfile.ZipFile(z, 'r') as zf:
-                        # Get top level folders
-                        folders = set()
-                        for name in zf.namelist():
-                            # name is like "folder/file.jpg"
-                            if '/' in name:
-                                folders.add(name.split('/')[0])
+            try:
+                with zipfile.ZipFile(z, 'r') as zf:
+                    # Get top level folders
+                    folders = set()
+                    for name in zf.namelist():
+                        # name is like "folder/file.jpg"
+                        if '/' in name:
+                            folders.add(name.split('/')[0])
 
-                        for folder in folders:
-                            full_path = os.path.join(settings.UPLOAD_DIR, folder)
-                            if os.path.exists(full_path):
-                                logger.info(f"Pruning uploaded folder after verification: {folder}")
-                                shutil.rmtree(full_path)
-                except Exception as e:
-                    logger.error(f"Failed to prune source folders from zip {z}: {e}")
+                    for folder in folders:
+                        full_path = os.path.join(settings.UPLOAD_DIR, folder)
+                        if os.path.exists(full_path):
+                            logger.info(f"Pruning uploaded folder after verification: {folder}")
+                            shutil.rmtree(full_path)
+            except Exception as e:
+                logger.error(f"Failed to prune source folders from zip {z}: {e}")
 
-                # Check usage again
-                _, u, _ = shutil.disk_usage(settings.ARCHIVE_DIR)
-                if (u / (1024**3)) < settings.MAX_LOCAL_STORAGE_GB:
-                    break
-            else:
-                logger.warning(f"Skipping {z} - not found on remote.")
+            # Update usage
+            total, used, free = shutil.disk_usage(settings.ARCHIVE_DIR)
+            used_gb = used / (1024**3)
 
 def run_loop():
     logger.info("Daemon started.")
@@ -291,7 +276,7 @@ def run_loop():
             backup_database()
             archive_media()
             rclone_copy()
-            smart_pruning()
+            smart_pruning(verify_remote=True)
             logger.info("Cycle complete. Sleeping 10 mins.")
         except Exception as e:
             logger.error(f"Unhandled exception in loop: {e}")
