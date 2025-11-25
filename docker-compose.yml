@@ -1,0 +1,41 @@
+services:
+  app:
+    build: .
+    image: wedding-app:latest
+    container_name: wedding_app
+    command: app
+    restart: always
+    environment:
+      - EVENT_TIMEZONE=America/Los_Angeles
+      - MAX_MEDIA_SIZE_MB=500
+      - MAX_LOCAL_STORAGE_GB=40
+      - DATABASE_URL=sqlite+aiosqlite:////data/database.sqlite
+      # Add other env vars as needed from .env
+    volumes:
+      - ./data:/data
+      - ./schedule.json:/app/schedule.json
+    ports:
+      - "8000:8000"
+    # No resources limits as requested
+
+  daemon:
+    build: .
+    image: wedding-app:latest
+    container_name: wedding_daemon
+    command: daemon
+    restart: always
+    environment:
+      - EVENT_TIMEZONE=America/Los_Angeles
+      - MAX_LOCAL_STORAGE_GB=40
+      - DATABASE_URL=sqlite+aiosqlite:////data/database.sqlite
+      - RCLONE_REMOTE_NAME=gdrive
+    volumes:
+      - ./data:/data
+      - ./rclone.conf:/root/.config/rclone/rclone.conf # Mapping rclone config
+    # No resources limits
+    depends_on:
+      - app
+
+networks:
+  default:
+    name: wedding_net

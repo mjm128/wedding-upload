@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Login</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container" style="max-width: 400px; margin: 50px auto; padding: 20px;">
+        <div class="glass-card">
+            <h1 style="text-align: center;">Admin Login</h1>
+            <form action="/admin/login" method="POST" style="display: flex; flex-direction: column; gap: 10px;">
+                <input type="password" name="password" placeholder="Password" style="padding: 10px; border-radius: 5px; border: none;">
+                <button type="submit" class="btn">Login</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>

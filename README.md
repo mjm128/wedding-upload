@@ -1,135 +1,147 @@
-**Role:** Senior Python Backend Engineer & DevOps Specialist (Focus on Data Integrity, Reliability, and UX).
+# Wedding Photo/Video Upload Service
 
-**Task:** Create a complete, production-ready source code structure for a self-hosted Wedding Photo/Video Upload Service.
+A self-hosted, high-performance wedding media upload service designed for reliability, speed, and elegance. Built with FastAPI, SQLite (WAL), and Vanilla JS.
 
-**Deployment Context:**
-* **Infrastructure:** Oracle Cloud Free Tier (ARM64/Ampere).
-* **OS:** Oracle Linux / Ubuntu.
-* **Containerization:** Docker Compose (Target platform: `linux/arm64`).
-* **Resource Policy:** **UNRESTRICTED.** Do not apply `deploy: resources: limits` in Docker. The app must have access to the full 24GB RAM for video processing and caching.
-* **Storage:** Local Boot Volume (Docker Volume mapped to host).
-* **Proxy:** The app sits behind a reverse proxy (Nginx).
-* **DNS Strategy:** Cloudflare Subdomain (A Record) pointing directly to the Oracle VM Public IP. SSL is handled by Nginx Proxy Manager on port 443.
+## Features
 
-**Tech Stack:**
-* **Backend:** Python 3.14 (Use `python:3.14-slim` image) with **FastAPI**.
-* **Database:** **SQLite** (via SQLAlchemy). **CRITICAL:** Must use `PRAGMA journal_mode=WAL;` and `PRAGMA synchronous=NORMAL;` to handle concurrent writes without locking.
-* **Frontend:** Jinja2 Templates + Vanilla JS (No build step).
-* **Media:** `ffmpeg` (installed in Docker) and `pillow-heif`.
-* **Backup:** `rclone` (sidecar container).
+*   **Zero-Code Configuration:** Fully configurable via Environment Variables and `schedule.json`.
+*   **High-End UI:** "Expensive" dark/gold theme with glassmorphism and smooth transitions.
+*   **Resumable Uploads:** Mobile-first design with wake lock, progress bars, and retry logic.
+*   **Live Slideshow:** Real-time feed of uploads with auto-refresh and moderation.
+*   **Robust Archival:** Automated backups to local zip and Cloud Storage (Rclone) with smart pruning.
+*   **Privacy & Moderation:** Admin dashboard to hide/star media, set global banners, and monitor stats.
 
-**1. The "Zero-Code" Configuration Strategy:**
+## Deployment Guide
 
-The app must be configured 100% via Environment Variables (`.env`) and a `schedule.json`:
+### 1. Oracle Cloud Infrastructure (OCI) Setup
 
-* **Env Variables (`.env`):**
-    * `EVENT_TIMEZONE` (e.g., "America/Los_Angeles").
-    * `MAX_MEDIA_SIZE_MB` (Default: 500).
-    * `MAX_VIDEO_DURATION_SEC` (Default: 60).
-    * `MAX_LOCAL_STORAGE_GB` (Default: 40) -> *Trigger for local pruning*.
-    * `GENERATE_VIDEO_THUMBNAILS` (Bool, Default: True).
-    * `VIDEO_THUMBNAIL_TIMESTAMP` (Float, Default: 2.0).
-    * `THROTTLE_DEFAULT_LIMIT` (Int, Default: 5).
-    * `THROTTLE_WINDOW_MIN` (Int, Default: 10).
-    * `SLIDESHOW_REFRESH_INTERVAL_SEC` (Int, Default: 300).
-    * `ADMIN_PASSWORD`.
-    * `ADMIN_MAGIC_TOKEN` (String for passwordless login).
-    * `DISCORD_WEBHOOK_URL`.
-    * `RCLONE_REMOTE_NAME` (Default: "gdrive").
-    * `POST_UPLOAD_ACTION_URL` (Optional, e.g., Registry URL).
-    * `POST_UPLOAD_ACTION_LABEL` (Optional, e.g., "Visit Registry").
-* **Event Schedule (`schedule.json`):**
-    * JSON list defining time blocks to auto-switch "Party Mode" (standard/blackout/unlimited).
+1.  **Create Instance:**
+    *   Image: Oracle Linux 8 or Ubuntu Minimal.
+    *   Shape: VM.Standard.A1.Flex (ARM64/Ampere).
+    *   OCPU: 4, RAM: 24GB.
+    *   Boot Volume: 50GB+ (Recommended).
 
-**2. Core Features & Business Logic:**
+2.  **Network Security Groups (Ingress Rules):**
+    *   Open Ports: `80` (HTTP), `443` (HTTPS), `81` (Nginx Proxy Manager Admin), `22` (SSH).
+    *   Source: `0.0.0.0/0` (or restricted to your IP for port 81/22).
 
-* **Authentication & User Tracking:**
-    * **Flexible Entry:** Support `/?table=5` (stores table # in session) and `/?auth=xyz`.
-    * **Identity:** Check session cookie. If missing, show "Welcome! Name?" form.
-    * **Magic Admin Entry:** `/admin/login?token=ADMIN_MAGIC_TOKEN` -> Sets admin cookie instantly.
+### 2. Docker Installation (ARM64)
 
-* **Global Announcement System:**
-    * **Backend:** Store a global "Banner Message" string in the database (e.g., "Cake Cutting in 5 Minutes!").
-    * **Frontend:** Both the *Upload Page* and the *Slideshow* must poll (or check on load) for this message.
-    * **Display:** If set, show a prominent sticky banner at the top of the screen.
-    * **Admin:** This is configurable in the admin view
+```bash
+# Update and install dependencies
+sudo apt-get update && sudo apt-get install -y docker.io docker-compose
 
-* **Timezone Aware Throttling:**
-    * Load `schedule.json`. Check Server Time vs. Schedule in `EVENT_TIMEZONE`.
-    * Enforce modes (`blackout` rejects uploads).
+# Start Docker
+sudo systemctl enable --now docker
 
-* **Frontend Experience (Mobile First, PWA, Resumable):**
-    * **Theme Engine:**
-        * **Default:** "Battery Saver" Dark Mode (Background: `#000000`, Text: `#E0E0E0`, Accents: Deep Purple/Gold).
-        * **Toggle:** "Elegant Light Mode" (Background: Cream/Off-White, Text: Charcoal, Accents: Gold/Sage Green).
-        * Use CSS variables for hot-swapping.
-    * **PWA Manifest:** Include `manifest.json` + Service Worker for "Install App" and UI caching.
-    * **Orientation Fix (Crucial):** Use `blueimp-load-image` to rotate images/canvas *before* upload based on EXIF.
-    * **Pre-Upload Validation:** JS checks file size & video duration (hidden `<video>` tag) *before* POST.
-    * **Retry Queue:** `localStorage` saves "Failed Uploads". Show "Retry" button on network recovery.
-    * **Guestbook:** Add an optional "Note/Caption" text field.
-    * **My Uploads View:** A page/modal showing the user's history. Allow "Delete" (soft-delete) for 10 minutes after upload.
-    * **UX:** `navigator.wakeLock`, Visual Progress Bar, Confetti.
-    * **Post-Upload Action:** Link to `POST_UPLOAD_ACTION_URL` after success.
+# Verify ARM64 architecture
+docker version
+```
 
-* **Upload Handling (Zero Data Loss & CPU Aware):**
-    * **CPU Watchdog:** If `psutil.cpu_percent() > 90%`, skip thumbnail gen (queue for later).
-    * **Streaming:** `aiofiles` for async streaming.
-    * **Deduplication:** Check DB for SHA-256 match. If exists, discard but return 200 OK.
-    * **Integrity Verify:** Write to disk -> Re-read -> Verify SHA-256 matches stream hash -> Return 200 OK.
-    * **Thumbnails:** Generate low-res JPG previews.
+### 3. Application Setup
 
-* **Slideshow Feed:**
-    * **Endpoint:** `/slideshow/feed?cursor=TIMESTAMP&limit=20`.
-    * **Moderation:** Filter `hidden=True`. Prioritize `starred=True`.
-    * **Caching:** `functools.lru_cache` (TTL 30s).
-    * **UI:** Infinite scroll. Auto-refresh logic (configurable).
-    * **Display Mode Toggle:** Button for "TV Mode" (Full Bleed) vs "Projector Mode" (5% padding).
+1.  **Clone the Repository:**
+    ```bash
+    git clone <repo_url> wedding-app
+    cd wedding-app
+    ```
 
-* **Admin & Monitoring:**
-    * **Health Check Endpoint:** `/health` returning JSON status (DB/Disk/Permissions).
-    * **Stats:** Disk Usage (Live), DB Counts, Recent Uploads.
-    * **Announcement Controls:** Input field to Set/Clear the "Global Banner Message".
-    * **Moderation:** "Hide" and "Star" buttons.
-    * **Tools:** QR Code Generator, Manual Overrides, "Download All" (.tar stream).
+2.  **Configure Environment:**
+    Create a `.env` file (or rely on defaults in `docker-compose.yml`):
+    ```ini
+    EVENT_TIMEZONE=America/Los_Angeles
+    ADMIN_PASSWORD=MySecurePassword
+    ADMIN_MAGIC_TOKEN=magic123
+    RCLONE_REMOTE_NAME=gdrive
+    DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+    ```
 
-**3. The Archival & Backup Strategy (Complex):**
-* **Container A (App):** Handles uploads to `/data/uploads`.
-* **Container B (Daemon):** `archive_daemon.py` runs every 10 mins.
-    * **Step 1: Backup DB:** Copy `database.sqlite` to `/data/archives/db_backup_{ts}.sqlite`.
-    * **Step 2: Archive Media:** Zip folders older than 30 mins -> `/data/archives/batch_{ts}.zip`.
-    * **Step 3: Verify:** Run `zipfile.testzip()`. Fail = Alert Discord & Abort.
-    * **Step 4: Rclone Copy:** `rclone copy /data/archives remote:wedding_backup`.
-    * **Step 5: Smart Pruning:**
-        * Check local disk usage.
-        * **IF AND ONLY IF** usage > `MAX_LOCAL_STORAGE_GB`:
-            * Identify local ZIPs verified as "on remote" (`rclone lsl`).
-            * Delete *oldest* local ZIPs until usage < limit.
-            * *Never* delete the active `/data/uploads` folder.
+3.  **Configure Rclone:**
+    You need an `rclone.conf` file for the backup daemon.
+    Run this locally to generate the config, then copy it to the server:
+    ```bash
+    rclone config
+    # Follow steps to auth with Google Drive / S3
+    ```
+    Place `rclone.conf` in the project root.
 
-**Deliverables (File Checklist):**
+4.  **Configure Schedule:**
+    Edit `schedule.json` to define event blocks (e.g., blackout times during vows).
 
-You MUST provide the code for **ALL** of the following files. Do not skip any.
+### 4. Build and Run
 
-1.  `README.md`: A comprehensive deployment guide including:
-    * **Oracle Cloud Setup:** Ingress rules for 80/443/81.
-    * **Docker Setup:** Installation steps for ARM64.
-    * **Nginx Proxy Manager (NPM):** Detailed `docker-compose` for NPM and setup steps.
-    * **Cloudflare & SSL:** Specific instructions on setting a Cloudflare A-Record (DNS Only or Proxied) to the Oracle IP and configuring NPM to issue Let's Encrypt certificates for that subdomain on Port 443.
-2.  `docker-compose.yml`: (App + Daemon + External Network for Proxy. **NO** CPU/RAM limits).
-3.  `Dockerfile`: (Base `python:3.14-slim`, install `ffmpeg`, `rclone`, `zip`).
-4.  `app/main.py`: (FastAPI logic, Routes, Middleware).
-5.  `app/database.py`: (Async engine with WAL mode).
-6.  `app/models.py`: (SQLAlchemy models).
-7.  `app/config.py`: (Pydantic settings).
-8.  `app/static/style.css`: (The modern, high-end CSS with Glassmorphism and Gold accents).
-9.  `app/static/manifest.json` & `app/static/sw.js`: (PWA settings).
-10. `app/templates/index.html`: (The upload UI with Theme Toggle).
-11. `app/templates/slideshow.html`: (The view-only feed).
-12. `app/templates/admin.html`: (Dashboard).
-13. `daemon/archive_daemon.py`: (The backup script).
-14. `stress_test.py`: (Script to verify pruning logic).
-15. `schedule.json`: (Example data).
+```bash
+# Build the image
+docker-compose build
 
-**UI Design Instruction:**
-The Frontend must look "Expensive." Use a dark mode default with gold accents (#D4AF37). Use `backdrop-filter: blur()` for glass cards. Use the 'Playfair Display' font for headers. Ensure it feels like a modern native app with smooth transitions.
+# Start services (detached)
+docker-compose up -d
+```
+
+### 5. Nginx Proxy Manager (NPM) Setup
+
+To handle SSL and easy proxying, use NPM.
+
+1.  **Create NPM Compose File (`npm-compose.yml`):**
+    ```yaml
+    version: '3'
+    services:
+      app:
+        image: 'jc21/nginx-proxy-manager:latest'
+        restart: unless-stopped
+        ports:
+          - '80:80'
+          - '81:81'
+          - '443:443'
+        volumes:
+          - ./data:/data
+          - ./letsencrypt:/etc/letsencrypt
+    ```
+
+2.  **Start NPM:**
+    ```bash
+    docker-compose -f npm-compose.yml up -d
+    ```
+
+3.  **Configure Proxy Host:**
+    *   Go to `http://<ORACLE_IP>:81`.
+    *   Default Login: `admin@example.com` / `changeme`.
+    *   **Add Proxy Host:**
+        *   Domain Names: `wedding.yourdomain.com`
+        *   Scheme: `http`
+        *   Forward Host: `<ORACLE_PRIVATE_IP>` or `wedding_app` (if on same network).
+        *   Forward Port: `8000`.
+        *   **SSL Tab:** Request a new Let's Encrypt Certificate. Force SSL.
+
+### 6. Cloudflare DNS Setup
+
+1.  **A Record:**
+    *   Name: `wedding`
+    *   IPv4 Address: `<ORACLE_PUBLIC_IP>`
+    *   Proxy Status: **DNS Only** (Grey Cloud) recommended initially to ensure Let's Encrypt works via HTTP-01 challenge. Once SSL is issued in NPM, you can switch to **Proxied** (Orange Cloud) for DDoS protection (ensure SSL setting in Cloudflare is "Full").
+
+## Architecture
+
+*   **App Container (`app`):** Runs FastAPI via Uvicorn. Handles uploads, serves UI, and streams media.
+*   **Daemon Container (`daemon`):** Runs `archive_daemon.py`.
+    *   Checks for new files every 10 minutes.
+    *   Creates ZIP archives.
+    *   Uploads to Cloud Storage via Rclone.
+    *   Prunes local archives if disk usage > 40GB.
+*   **Storage:**
+    *   `/data/uploads`: Raw media files.
+    *   `/data/archives`: ZIP backups and DB snapshots.
+    *   `/data/database.sqlite`: SQLite WAL database.
+
+## Testing
+
+Run the pruning stress test:
+```bash
+python3 stress_test.py
+```
+(Requires mocking dependencies or running inside the container).
+
+## Admin Access
+
+*   URL: `/admin`
+*   Login: Use the password configured in `.env` or the magic link `/admin/login?token=MAGIC_TOKEN`.

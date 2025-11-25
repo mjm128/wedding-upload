@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+sqlalchemy
+aiosqlite
+pydantic
+pydantic-settings
+jinja2
+python-multipart
+aiofiles
+pillow
+pillow-heif
+psutil
+requests
+pytz
