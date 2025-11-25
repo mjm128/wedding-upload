@@ -17,7 +17,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.security import APIKeyCookie
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, desc, func, delete
+from sqlalchemy import select, update, desc, func, delete, text
 
 import aiofiles
 from PIL import Image
@@ -39,15 +39,15 @@ async def lifespan(app: FastAPI):
     logger.info("Starting up...")
     await init_db()
 
-    # Ensure directories exist
-    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    os.makedirs(settings.ARCHIVE_DIR, exist_ok=True)
-
     yield
     # Shutdown
     logger.info("Shutting down...")
 
 app = FastAPI(lifespan=lifespan)
+
+# Ensure directories exist before mounting StaticFiles
+os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+os.makedirs(settings.ARCHIVE_DIR, exist_ok=True)
 
 # --- Mount Static & Templates ---
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
@@ -290,6 +290,7 @@ async def upload_media(
     )
     db.add(new_media)
     await db.commit()
+    await db.refresh(new_media)
 
     return {"status": "success", "id": new_media.id}
 
@@ -453,5 +454,3 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         "disk": disk_status,
         "status": "healthy" if db_status == "ok" and disk_status == "ok" else "unhealthy"
     }
-
-from sqlalchemy import text
