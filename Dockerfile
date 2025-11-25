@@ -1,5 +1,5 @@
 # Stage 1: Builder (if needed, but we stick to slim and install runtime deps)
-FROM python:3.14-slim
+FROM python:3.12-slim
 
 # Install system dependencies
 # ffmpeg for video processing, curl/unzip for rclone install
