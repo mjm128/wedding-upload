@@ -17,7 +17,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.security import APIKeyCookie
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, desc, func, delete
+from sqlalchemy import select, update, desc, func, delete, text
 
 import aiofiles
 from PIL import Image
@@ -39,15 +39,15 @@ async def lifespan(app: FastAPI):
     logger.info("Starting up...")
     await init_db()
 
-    # Ensure directories exist
-    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    os.makedirs(settings.ARCHIVE_DIR, exist_ok=True)
-
     yield
     # Shutdown
     logger.info("Shutting down...")
 
 app = FastAPI(lifespan=lifespan)
+
+# Ensure directories exist before mounting StaticFiles
+os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+os.makedirs(settings.ARCHIVE_DIR, exist_ok=True)
 
 # --- Mount Static & Templates ---
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
@@ -290,6 +290,7 @@ async def upload_media(
     )
     db.add(new_media)
     await db.commit()
+    await db.refresh(new_media)
 
     return {"status": "success", "id": new_media.id}
 
@@ -333,6 +334,42 @@ async def slideshow_feed(
         })
 
     return {"items": data, "next_cursor": data[-1]["created_at"] if data else None}
+
+@app.get("/my-uploads")
+async def my_uploads(
+    guest_info: dict = Depends(get_current_guest),
+    db: AsyncSession = Depends(get_db)
+):
+    """Returns uploads for the current guest session."""
+    if not guest_info["name"]:
+        return []
+
+    query = select(Media).where(
+        Media.uploaded_by == guest_info["name"],
+        Media.table_number == guest_info["table"]
+    ).order_by(desc(Media.created_at))
+
+    result = await db.execute(query)
+    media_items = result.scalars().all()
+
+    data = []
+    for m in media_items:
+        data.append({
+            "id": m.id,
+            "url": f"/uploads/{m.filename}",
+            "thumbnail": f"/uploads/{m.thumbnail_path}" if m.thumbnail_path else None,
+            "type": m.file_type,
+            "caption": m.caption,
+            "created_at": m.created_at.isoformat()
+        })
+    return data
+
+@app.get("/public/stats")
+async def public_stats(db: AsyncSession = Depends(get_db)):
+    """Public stats for the live feed."""
+    photo_count = await db.scalar(select(func.count(Media.id)).where(Media.file_type == 'image', Media.is_hidden == False))
+    video_count = await db.scalar(select(func.count(Media.id)).where(Media.file_type == 'video', Media.is_hidden == False))
+    return {"photos": photo_count, "videos": video_count}
 
 # --- Admin Routes ---
 
@@ -453,5 +490,3 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         "disk": disk_status,
         "status": "healthy" if db_status == "ok" and disk_status == "ok" else "unhealthy"
     }
-
-from sqlalchemy import text
