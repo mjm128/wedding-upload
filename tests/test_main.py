@@ -1,32 +1,14 @@
-import os
 import pytest
 from unittest.mock import patch
 
-# Set env vars BEFORE importing app.main/database
-# We use patch.dict to ensure it's set for the duration of the test module loading?
-# No, patch.dict works on a dict object. os.environ is a dict-like object.
-# But imports happen at module level.
-# So we need to set them in the module scope before imports.
-
-os.environ["UPLOAD_DIR"] = "/tmp/test_uploads"
-os.environ["ARCHIVE_DIR"] = "/tmp/test_archives"
-os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
-
-# Ensure dirs exist
-os.makedirs(os.environ["UPLOAD_DIR"], exist_ok=True)
-os.makedirs(os.environ["ARCHIVE_DIR"], exist_ok=True)
-
-from fastapi.testclient import TestClient
-from app.main import app
-
-@pytest.fixture(scope="module", autouse=True)
-def setup_db():
-    # Initialize the DB for tests
+@pytest.fixture(scope="module")
+def client():
+    from app.main import app
+    from fastapi.testclient import TestClient
     with TestClient(app) as c:
         yield c
 
-def test_health_check(setup_db):
-    client = setup_db
+def test_health_check(client):
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
@@ -34,13 +16,13 @@ def test_health_check(setup_db):
     assert data["database"] == "ok"
     assert data["disk"] == "ok"
 
-def test_upload_flow(setup_db):
-    client = setup_db
+def test_upload_flow(client):
     import uuid
     content = f"fake image content {uuid.uuid4()}".encode()
     files = {"file": ("test.jpg", content, "image/jpeg")}
 
     client.cookies.set("guest_name", "TestUser")
+    client.cookies.set("guest_uuid", "test-uuid")
 
     response = client.post("/upload", files=files, data={"caption": "Test Caption"})
 
@@ -64,8 +46,7 @@ def test_upload_flow(setup_db):
             break
     assert found, "Uploaded item not found in feed"
 
-def test_config_endpoint(setup_db):
-    client = setup_db
+def test_config_endpoint(client):
     response = client.get("/config")
     assert response.status_code == 200
     data = response.json()

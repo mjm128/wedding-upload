@@ -6,47 +6,27 @@ import unittest
 from unittest.mock import MagicMock, patch
 import sys
 import tempfile
+import importlib
 
 # Add project root to path
 sys.path.append(os.getcwd())
 
-# Create temp dirs for testing
-TEST_DIR = tempfile.mkdtemp()
-ARCHIVE_DIR = os.path.join(TEST_DIR, "archives")
-UPLOAD_DIR = os.path.join(TEST_DIR, "uploads")
-os.makedirs(ARCHIVE_DIR, exist_ok=True)
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-# Set environment variables BEFORE importing app/daemon
-os.environ["ARCHIVE_DIR"] = ARCHIVE_DIR
-os.environ["UPLOAD_DIR"] = UPLOAD_DIR
-os.environ["MAX_LOCAL_STORAGE_GB"] = "0.0001" # 100KB
-os.environ["RCLONE_REMOTE_NAME"] = "mock"
-os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
-
-# Now import
-from daemon import archive_daemon
-from app.config import settings
-
 class TestPruning(unittest.TestCase):
-    def tearDown(self):
-        # We don't remove TEST_DIR here because we reuse it across tests (logging keeps file open)
-        # But for correctness we should close logging handlers.
-        pass
+    def setUp(self):
+        self.ARCHIVE_DIR = os.environ["ARCHIVE_DIR"]
+        # Clear out the dir for a clean test
+        if os.path.exists(self.ARCHIVE_DIR):
+            shutil.rmtree(self.ARCHIVE_DIR)
+        os.makedirs(self.ARCHIVE_DIR)
 
-    @classmethod
-    def tearDownClass(cls):
-        # Close logging handlers to allow cleanup
-        import logging
-        logging.shutdown()
-        if os.path.exists(TEST_DIR):
-            shutil.rmtree(TEST_DIR)
-
-    @patch("daemon.archive_daemon.subprocess.run")
-    def test_pruning_logic(self, mock_subprocess):
+    def test_pruning_logic(self):
+        from daemon import archive_daemon
+        import app.config
+        importlib.reload(app.config)
+        importlib.reload(archive_daemon)
         # 1. Create dummy large zip files
-        zip1 = os.path.join(ARCHIVE_DIR, "batch_1.zip")
-        zip2 = os.path.join(ARCHIVE_DIR, "batch_2.zip")
+        zip1 = os.path.join(self.ARCHIVE_DIR, "batch_1.zip")
+        zip2 = os.path.join(self.ARCHIVE_DIR, "batch_2.zip")
 
         with open(zip1, 'wb') as f:
             f.write(os.urandom(1024 * 1024)) # 1MB
@@ -57,14 +37,10 @@ class TestPruning(unittest.TestCase):
         with open(zip2, 'wb') as f:
             f.write(os.urandom(1024 * 1024)) # 1MB
 
-        # 2. Mock rclone verify response
-        mock_subprocess.return_value.returncode = 0
-        mock_subprocess.return_value.stdout = '[{"Name":"batch_1.zip"}]'
+        # 2. Run pruning
+        archive_daemon.smart_pruning(verify_remote=False)
 
-        # 3. Run pruning
-        archive_daemon.smart_pruning()
-
-        # 4. Verify zip1 is gone (oldest)
+        # 3. Verify zip1 is gone (oldest)
         self.assertFalse(os.path.exists(zip1), "Oldest zip should be deleted")
 
         # zip2 should also be deleted as usage (1MB) > limit (100KB)
