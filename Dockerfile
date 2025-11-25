@@ -1,5 +1,5 @@
 # Stage 1: Builder (if needed, but we stick to slim and install runtime deps)
-FROM python:3.14-slim
+FROM python:3.12-slim
 
 # Install system dependencies
 # ffmpeg for video processing, curl/unzip for rclone install
@@ -35,6 +35,7 @@ EXPOSE 8000
 
 # Helper script to run app or daemon
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Fix potential CRLF line endings and make executable
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
