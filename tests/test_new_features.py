@@ -30,6 +30,7 @@ def test_my_uploads_endpoint(setup_db):
     # Set cookie for user identity
     client.cookies.set("guest_name", "TestUser")
     client.cookies.set("table_number", "1")
+    client.cookies.set("guest_uuid", str(uuid.uuid4()))
 
     # Upload
     response = client.post("/upload",

@@ -120,14 +120,16 @@ function nextSlide() {
 
     const item = queue[currentIndex];
 
+    // Mark as viewed
+    fetch(`/media/${item.id}/viewed`, { method: 'POST' });
+
     // Create Element
     const el = document.createElement(item.type === 'video' ? 'video' : 'img');
-    // Prefer thumbnail for images if available to save bandwidth
     el.src = (item.type !== 'video' && item.thumbnail) ? item.thumbnail : item.url;
     el.className = 'slide';
 
     if (item.type === 'video') {
-        el.muted = true; // Auto-play requires mute usually
+        el.muted = true;
         el.autoplay = true;
         el.playsInline = true;
 
@@ -137,6 +139,7 @@ function nextSlide() {
              nextSlide();
         };
     } else {
+        el.classList.add('ken-burns');
         el.onload = () => {
             // Ready
         };
@@ -177,8 +180,10 @@ function nextSlide() {
 
     // Trigger Fade In
     // Force reflow
-    void el.offsetWidth;
-    el.classList.add('active');
+    requestAnimationFrame(() => {
+        el.classList.add('active');
+    });
+
 
     // Remove old slide after transition
     if (oldSlide) {
