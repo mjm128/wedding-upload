@@ -3,11 +3,13 @@ import json
 import uuid
 import hashlib
 import asyncio
+import time
 import shutil
 import logging
 from typing import List, Optional
 from datetime import datetime, timedelta
 import pytz
+import psutil
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Depends, HTTPException, status, UploadFile, File, Form, Response, Cookie
@@ -17,7 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.security import APIKeyCookie
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, desc, func, delete
+from sqlalchemy import select, update, desc, func, delete, text, or_
 
 import aiofiles
 from PIL import Image
@@ -39,21 +41,23 @@ async def lifespan(app: FastAPI):
     logger.info("Starting up...")
     await init_db()
 
-    # Ensure directories exist
-    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    os.makedirs(settings.ARCHIVE_DIR, exist_ok=True)
-
     yield
     # Shutdown
     logger.info("Shutting down...")
 
 app = FastAPI(lifespan=lifespan)
 
+# Ensure directories exist before mounting StaticFiles
+os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+os.makedirs(settings.THUMBNAIL_DIR, exist_ok=True)
+os.makedirs(settings.ARCHIVE_DIR, exist_ok=True)
+
 # --- Mount Static & Templates ---
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 # We also need to serve the uploads, but maybe restricted?
 # For slideshow, we definitely need access.
 app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
+app.mount("/thumbnails", StaticFiles(directory=settings.THUMBNAIL_DIR), name="thumbnails")
 
 templates = Jinja2Templates(directory="app/templates")
 
@@ -225,9 +229,22 @@ async def upload_media(
     if not (content_type.startswith("image/") or content_type.startswith("video/")):
          raise HTTPException(status_code=400, detail="Invalid file type.")
 
+    # Sanitize name
+    if not guest_info["name"]:
+        raise HTTPException(status_code=401, detail="Guest name required.")
+
+    safe_name = "".join(c for c in guest_info["name"] if c.isalnum() or c in (' ', '_', '-')).strip()
+    if not safe_name:
+        safe_name = "Anonymous"
+
+    timestamp_uuid = f"{int(time.time())}_{uuid.uuid4().hex[:8]}"
+    upload_folder_name = f"{timestamp_uuid}_{safe_name}"
+    upload_folder_path = os.path.join(settings.UPLOAD_DIR, upload_folder_name)
+    os.makedirs(upload_folder_path, exist_ok=True)
+
     file_ext = os.path.splitext(file.filename)[1]
     unique_filename = f"{uuid.uuid4()}{file_ext}"
-    file_path = os.path.join(settings.UPLOAD_DIR, unique_filename)
+    file_path = os.path.join(upload_folder_path, unique_filename)
 
     # 2. Streaming Write & Hash
     sha256 = hashlib.sha256()
@@ -272,12 +289,41 @@ async def upload_media(
         os.remove(file_path)
         raise HTTPException(status_code=500, detail="Integrity check failed.")
 
-    # 5. Generate Thumbnail
-    thumb_file = await generate_thumbnail(file_path, content_type)
+    # 5. Generate Thumbnail (Save to THUMBNAIL_DIR)
+    thumb_filename = None
+    try:
+        thumb_name = f"thumb_{unique_filename}.jpg"
+        thumb_path = os.path.join(settings.THUMBNAIL_DIR, thumb_name)
+
+        if content_type.startswith("image"):
+            await asyncio.to_thread(_process_image_thumbnail, file_path, thumb_path)
+            thumb_filename = thumb_name
+        elif content_type.startswith("video") and settings.GENERATE_VIDEO_THUMBNAILS:
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(settings.VIDEO_THUMBNAIL_TIMESTAMP),
+                "-i", file_path,
+                "-vframes", "1",
+                "-q:v", "2",
+                thumb_path
+            ]
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL
+            )
+            await process.wait()
+            if os.path.exists(thumb_path):
+                thumb_filename = thumb_name
+    except Exception as e:
+        logger.error(f"Thumbnail generation failed: {e}")
 
     # 6. Save to DB
+    # Store relative path for filename including folder
+    relative_filename = os.path.join(upload_folder_name, unique_filename)
+
     new_media = Media(
-        filename=unique_filename,
+        filename=relative_filename,
         original_filename=file.filename,
         file_type="video" if content_type.startswith("video") else "image",
         mime_type=content_type,
@@ -286,10 +332,11 @@ async def upload_media(
         uploaded_by=guest_info["name"],
         table_number=guest_info["table"],
         caption=caption,
-        thumbnail_path=thumb_file
+        thumbnail_path=thumb_filename
     )
     db.add(new_media)
     await db.commit()
+    await db.refresh(new_media)
 
     return {"status": "success", "id": new_media.id}
 
@@ -300,6 +347,7 @@ async def slideshow(request: Request):
 @app.get("/slideshow/feed")
 async def slideshow_feed(
     cursor: Optional[str] = None,
+    q: Optional[str] = None,
     limit: int = 20,
     db: AsyncSession = Depends(get_db)
 ):
@@ -307,7 +355,19 @@ async def slideshow_feed(
     Returns media items.
     Cursor is a timestamp (ISO string).
     """
-    query = select(Media).where(Media.is_hidden == False).order_by(desc(Media.created_at)).limit(limit)
+    query = select(Media).where(Media.is_hidden == False)
+
+    if q:
+        # Fuzzy search for Admin moderation
+        search = f"%{q}%"
+        query = query.where(or_(
+            Media.caption.ilike(search),
+            Media.uploaded_by.ilike(search),
+            Media.filename.ilike(search),
+            Media.original_filename.ilike(search)
+        ))
+
+    query = query.order_by(desc(Media.created_at), desc(Media.id)).limit(limit)
 
     if cursor:
         try:
@@ -324,22 +384,102 @@ async def slideshow_feed(
         data.append({
             "id": m.id,
             "url": f"/uploads/{m.filename}",
-            "thumbnail": f"/uploads/{m.thumbnail_path}" if m.thumbnail_path else None,
+            "thumbnail": f"/thumbnails/{m.thumbnail_path}" if m.thumbnail_path else None,
             "type": m.file_type, # image or video
             "caption": m.caption,
             "author": m.uploaded_by,
             "created_at": m.created_at.isoformat(),
-            "is_starred": m.is_starred
+            "is_starred": m.is_starred,
+            "file_size": m.file_size_bytes,
+            "is_hidden": m.is_hidden
         })
 
     return {"items": data, "next_cursor": data[-1]["created_at"] if data else None}
 
+@app.get("/my-uploads")
+async def my_uploads(
+    guest_info: dict = Depends(get_current_guest),
+    db: AsyncSession = Depends(get_db)
+):
+    """Returns uploads for the current guest session."""
+    if not guest_info["name"]:
+        return []
+
+    query = select(Media).where(
+        Media.uploaded_by == guest_info["name"],
+        Media.table_number == guest_info["table"]
+    ).order_by(desc(Media.created_at))
+
+    result = await db.execute(query)
+    media_items = result.scalars().all()
+
+    data = []
+    for m in media_items:
+        data.append({
+            "id": m.id,
+            "url": f"/uploads/{m.filename}",
+            "thumbnail": f"/thumbnails/{m.thumbnail_path}" if m.thumbnail_path else None,
+            "type": m.file_type,
+            "caption": m.caption,
+            "created_at": m.created_at.isoformat(),
+            "file_size": m.file_size_bytes
+        })
+    return data
+
+@app.delete("/media/{media_id}")
+async def delete_media(
+    media_id: int,
+    guest_info: dict = Depends(get_current_guest),
+    db: AsyncSession = Depends(get_db)
+):
+    """Hard delete for user if file exists on disk (not archived/pruned)."""
+    media = await db.get(Media, media_id)
+    if not media:
+        raise HTTPException(404, "Media not found")
+
+    # Check ownership
+    if media.uploaded_by != guest_info["name"]:
+        raise HTTPException(403, "Not authorized")
+
+    # Check if file exists on disk
+    full_path = os.path.join(settings.UPLOAD_DIR, media.filename)
+    if not os.path.exists(full_path):
+        # Already pruned/archived
+        raise HTTPException(400, "Media already archived, cannot delete.")
+
+    # Delete
+    await db.delete(media)
+    await db.commit()
+
+    try:
+        os.remove(full_path)
+        if media.thumbnail_path:
+            thumb_path = os.path.join(settings.THUMBNAIL_DIR, media.thumbnail_path)
+            if os.path.exists(thumb_path):
+                os.remove(thumb_path)
+    except Exception as e:
+        logger.error(f"Error deleting file: {e}")
+
+    return {"status": "deleted"}
+
+@app.get("/public/stats")
+async def public_stats(db: AsyncSession = Depends(get_db)):
+    """Public stats for the live feed."""
+    photo_count = await db.scalar(select(func.count(Media.id)).where(Media.file_type == 'image', Media.is_hidden == False))
+    video_count = await db.scalar(select(func.count(Media.id)).where(Media.file_type == 'video', Media.is_hidden == False))
+    return {"photos": photo_count, "videos": video_count}
+
 # --- Admin Routes ---
 
 @app.get("/admin", response_class=HTMLResponse)
-async def admin_page(request: Request, is_admin: bool = Depends(get_admin_user)):
+async def admin_page(request: Request, token: Optional[str] = None, is_admin: bool = Depends(get_admin_user)):
+    if token == settings.ADMIN_MAGIC_TOKEN:
+        resp = templates.TemplateResponse("admin.html", {"request": request})
+        resp.set_cookie(key="admin_token", value=token, httponly=True)
+        return resp
+
     if not is_admin:
-        return templates.TemplateResponse("admin_login.html", {"request": request}) # Need to create this or handle in one
+        return templates.TemplateResponse("admin_login.html", {"request": request})
     return templates.TemplateResponse("admin.html", {"request": request})
 
 @app.get("/admin/login")
@@ -366,13 +506,37 @@ async def admin_stats(is_admin: bool = Depends(get_admin_user), db: AsyncSession
     usage = shutil.disk_usage(settings.UPLOAD_DIR)
 
     # DB Counts
-    count = await db.scalar(select(func.count(Media.id)))
+    total_count = await db.scalar(select(func.count(Media.id)))
+    photo_count = await db.scalar(select(func.count(Media.id)).where(Media.file_type == 'image'))
+    video_count = await db.scalar(select(func.count(Media.id)).where(Media.file_type == 'video'))
+
+    # System Metrics
+    cpu_usage = psutil.cpu_percent()
+    ram = psutil.virtual_memory()
+
+    # Backup Status
+    last_backup = "Unknown"
+    state_file = os.path.join(settings.ARCHIVE_DIR, "daemon_state.json")
+    if os.path.exists(state_file):
+        try:
+            with open(state_file, 'r') as f:
+                state = json.load(f)
+                ts = state.get("last_rclone_success")
+                if ts:
+                    last_backup = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+        except: pass
 
     return {
         "disk_total_gb": round(usage.total / (1024**3), 2),
         "disk_used_gb": round(usage.used / (1024**3), 2),
         "disk_free_gb": round(usage.free / (1024**3), 2),
-        "media_count": count
+        "media_total": total_count,
+        "media_photos": photo_count,
+        "media_videos": video_count,
+        "cpu_percent": cpu_usage,
+        "ram_percent": ram.percent,
+        "ram_used_gb": round(ram.used / (1024**3), 2),
+        "last_backup": last_backup
     }
 
 @app.post("/admin/banner")
@@ -428,6 +592,29 @@ async def media_action(
     await db.commit()
     return {"status": "ok"}
 
+@app.post("/admin/purge")
+async def admin_purge(pin: str = Form(...), is_admin: bool = Depends(get_admin_user), db: AsyncSession = Depends(get_db)):
+    if not is_admin: raise HTTPException(status_code=401)
+    if pin != settings.PURGE_PIN:
+        raise HTTPException(status_code=403, detail="Invalid PIN")
+
+    # 1. Truncate DB
+    await db.execute(delete(Media))
+    await db.execute(delete(AppConfig))
+    await db.commit()
+
+    # 2. Clear Directories
+    def clear_dir(path):
+        if os.path.exists(path):
+            shutil.rmtree(path)
+            os.makedirs(path, exist_ok=True)
+
+    clear_dir(settings.UPLOAD_DIR)
+    clear_dir(settings.THUMBNAIL_DIR)
+    clear_dir(settings.ARCHIVE_DIR)
+
+    return {"status": "purged"}
+
 @app.get("/health")
 async def health_check(db: AsyncSession = Depends(get_db)):
     # Check DB
@@ -453,5 +640,3 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         "disk": disk_status,
         "status": "healthy" if db_status == "ok" and disk_status == "ok" else "unhealthy"
     }
-
-from sqlalchemy import text
