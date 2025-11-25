@@ -21,6 +21,7 @@ class Settings(BaseSettings):
 
     # Paths - Use local paths for dev/test if /data is not writable
     UPLOAD_DIR: str = "/data/uploads" if os.access("/data", os.W_OK) else "data/uploads"
+    THUMBNAIL_DIR: str = "/data/thumbnails" if os.access("/data", os.W_OK) else "data/thumbnails"
     ARCHIVE_DIR: str = "/data/archives" if os.access("/data", os.W_OK) else "data/archives"
     DATABASE_URL: str = "sqlite+aiosqlite:////data/database.sqlite" if os.access("/data", os.W_OK) else "sqlite+aiosqlite:///data/database.sqlite"
 

@@ -82,6 +82,41 @@ h1, h2, h3 {
     display: none; /* Hidden by default */
 }
 
+/* Toast / Snackbar */
+#snackbar {
+    visibility: hidden;
+    min-width: 250px;
+    margin-left: -125px;
+    background-color: #333;
+    color: #fff;
+    text-align: center;
+    border-radius: 8px;
+    padding: 16px;
+    position: fixed;
+    z-index: 2000;
+    left: 50%;
+    bottom: 30px;
+    font-size: 17px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+    border: 1px solid var(--accent-color);
+}
+
+#snackbar.show {
+    visibility: visible;
+    -webkit-animation: fadein 0.5s, fadeout 0.5s 2.5s;
+    animation: fadein 0.5s, fadeout 0.5s 2.5s;
+}
+
+@keyframes fadein {
+    from {bottom: 0; opacity: 0;}
+    to {bottom: 30px; opacity: 1;}
+}
+
+@keyframes fadeout {
+    from {bottom: 30px; opacity: 1;}
+    to {bottom: 0; opacity: 0;}
+}
+
 /* Grid for Slideshow */
 .masonry-grid {
     display: flex;
@@ -127,16 +162,45 @@ h1, h2, h3 {
     transition: width 0.2s;
 }
 
-/* Toggle Switch */
-.theme-toggle {
-    position: absolute;
+/* Caption Input Fix */
+#caption {
+    box-sizing: border-box;
+}
+
+/* Top Toolbar */
+.top-toolbar {
+    position: fixed;
     top: 20px;
     right: 20px;
-    background: none;
-    border: none;
-    font-size: 24px;
+    display: flex;
+    gap: 10px;
+    z-index: 1100;
+}
+
+/* Shift down if banner is present */
+body.has-banner .top-toolbar {
+    top: 60px; /* Adjust based on banner height */
+    transition: top 0.3s;
+}
+
+.icon-btn {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    font-size: 20px;
     cursor: pointer;
     color: var(--text-color);
+    backdrop-filter: blur(5px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s, transform 0.1s;
+}
+
+.icon-btn:active {
+    transform: scale(0.9);
 }
 
 /* Admin Styles */
