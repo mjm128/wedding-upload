@@ -13,6 +13,9 @@ sys.path.append(os.getcwd())
 
 from app.config import settings
 
+# Ensure directories exist before logging
+os.makedirs(settings.ARCHIVE_DIR, exist_ok=True)
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -105,19 +108,21 @@ def archive_media():
     now = time.time()
     cutoff = now - (30 * 60) # 30 mins ago
 
-    # Find files
-    files_to_zip = []
+    # Find folders (new structure)
+    # We are looking for folders in UPLOAD_DIR that match the pattern timestamp_uuid_name
+    # AND are older than 30 mins (to ensure upload is done).
+
+    folders_to_archive = []
     for f in os.listdir(settings.UPLOAD_DIR):
         fp = os.path.join(settings.UPLOAD_DIR, f)
-        if os.path.isfile(fp):
+        if os.path.isdir(fp):
+            # Check age
             mtime = os.path.getmtime(fp)
             if mtime > last_run and mtime <= cutoff:
-                files_to_zip.append(fp)
+                folders_to_archive.append(fp)
 
-    if not files_to_zip:
-        logger.info("No new files to archive.")
-        # Update last run anyway to now - 30m? No, only if we checked.
-        # Actually we should update last_run to cutoff.
+    if not folders_to_archive:
+        logger.info("No new upload folders to archive.")
         with open(state_file, 'w') as f:
             json.dump({"last_run": cutoff}, f)
         return
@@ -128,10 +133,16 @@ def archive_media():
 
     try:
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-            for file_path in files_to_zip:
-                zf.write(file_path, os.path.basename(file_path))
+            for folder_path in folders_to_archive:
+                # Archive folder content
+                parent = os.path.dirname(folder_path)
+                for root, dirs, files in os.walk(folder_path):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        arcname = os.path.relpath(file_path, settings.UPLOAD_DIR) # Keep relative path from UPLOAD_DIR
+                        zf.write(file_path, arcname)
 
-        logger.info(f"Created archive {zip_name} with {len(files_to_zip)} files.")
+        logger.info(f"Created archive {zip_name} with {len(folders_to_archive)} folders.")
 
         # Verify
         if zipfile.is_zipfile(zip_path):
@@ -153,8 +164,23 @@ def archive_media():
             # Simple curl or requests
             subprocess.run(["curl", "-H", "Content-Type: application/json", "-d", f'{{"content": "Archival Failed: {e}"}}', settings.DISCORD_WEBHOOK_URL])
 
+def check_rclone_config():
+    """Check if rclone config exists and is valid (not empty)."""
+    # Rclone default config path inside container (usually ~/.config/rclone/rclone.conf)
+    # We are mapping to /root/.config/rclone/rclone.conf in docker-compose.yml
+    config_path = "/root/.config/rclone/rclone.conf"
+    if not os.path.exists(config_path):
+        return False
+    if os.path.getsize(config_path) == 0:
+        return False
+    return True
+
 def rclone_copy():
     """Rclone copy /data/archives remote:wedding_backup."""
+    if not check_rclone_config():
+        logger.warning("Rclone config missing or empty. Skipping remote backup.")
+        return
+
     cmd = ["rclone", "copy", settings.ARCHIVE_DIR, f"{settings.RCLONE_REMOTE_NAME}:wedding_backup"]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -173,6 +199,10 @@ def smart_pruning():
 
     if used_gb > settings.MAX_LOCAL_STORAGE_GB:
         logger.warning(f"Disk usage {used_gb:.2f}GB > Limit {settings.MAX_LOCAL_STORAGE_GB}GB. Pruning...")
+
+        if not check_rclone_config():
+            logger.warning("Rclone config missing or empty. Cannot verify remote status. Skipping pruning of ZIPs.")
+            return
 
         # Identify local ZIPs verified as on remote
         # We need to run `rclone lsl remote:wedding_backup` and match?
@@ -196,6 +226,41 @@ def smart_pruning():
                 # Exists on remote
                 logger.info(f"Deleting verified archive: {z}")
                 os.remove(z)
+
+                # Logic to purge source upload folders if they were in this archive?
+                # It's hard to link zip content back to source folders without inspecting the zip.
+                # But we can rely on "Age". If an archive was created and verified, folders OLDER than it can be purged?
+                # Or we implement a simpler logic:
+                # 1. Archive created (batch_TS.zip).
+                # 2. Rclone copied.
+                # 3. If verified, we can delete the SOURCE folders that went into it.
+                # But we lost that list.
+                # Alternative: "Prune Uploads" logic separately.
+
+                # IMPLEMENTATION:
+                # Since we want to delete uploads AFTER sync, we should do it here or in rclone_copy success.
+                # But rclone_copy just copies ARCHIVE_DIR.
+                # Ideally, after we zip folders, we delete them?
+                # No, we wait for sync.
+
+                # Let's check if we can verify the ZIP is on remote, then open the ZIP, read filenames (folders), and delete them from UPLOAD_DIR.
+
+                try:
+                    with zipfile.ZipFile(z, 'r') as zf:
+                        # Get top level folders
+                        folders = set()
+                        for name in zf.namelist():
+                            # name is like "folder/file.jpg"
+                            if '/' in name:
+                                folders.add(name.split('/')[0])
+
+                        for folder in folders:
+                            full_path = os.path.join(settings.UPLOAD_DIR, folder)
+                            if os.path.exists(full_path):
+                                logger.info(f"Pruning uploaded folder after verification: {folder}")
+                                shutil.rmtree(full_path)
+                except Exception as e:
+                    logger.error(f"Failed to prune source folders from zip {z}: {e}")
 
                 # Check usage again
                 _, u, _ = shutil.disk_usage(settings.ARCHIVE_DIR)

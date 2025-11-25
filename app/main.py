@@ -3,6 +3,7 @@ import json
 import uuid
 import hashlib
 import asyncio
+import time
 import shutil
 import logging
 from typing import List, Optional
@@ -17,7 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.security import APIKeyCookie
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, desc, func, delete
+from sqlalchemy import select, update, desc, func, delete, text
 
 import aiofiles
 from PIL import Image
@@ -39,21 +40,23 @@ async def lifespan(app: FastAPI):
     logger.info("Starting up...")
     await init_db()
 
-    # Ensure directories exist
-    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    os.makedirs(settings.ARCHIVE_DIR, exist_ok=True)
-
     yield
     # Shutdown
     logger.info("Shutting down...")
 
 app = FastAPI(lifespan=lifespan)
 
+# Ensure directories exist before mounting StaticFiles
+os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+os.makedirs(settings.THUMBNAIL_DIR, exist_ok=True)
+os.makedirs(settings.ARCHIVE_DIR, exist_ok=True)
+
 # --- Mount Static & Templates ---
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 # We also need to serve the uploads, but maybe restricted?
 # For slideshow, we definitely need access.
 app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
+app.mount("/thumbnails", StaticFiles(directory=settings.THUMBNAIL_DIR), name="thumbnails")
 
 templates = Jinja2Templates(directory="app/templates")
 
@@ -187,6 +190,12 @@ async def index(
     if table:
         response.set_cookie(key="table_number", value=table)
 
+    # Ensure guest identity
+    guest_name = request.cookies.get("guest_name")
+    if not guest_name:
+        new_guest = f"Guest-{str(uuid.uuid4())[:8]}"
+        response.set_cookie(key="guest_name", value=new_guest)
+
     return response
 
 @app.get("/config")
@@ -225,9 +234,19 @@ async def upload_media(
     if not (content_type.startswith("image/") or content_type.startswith("video/")):
          raise HTTPException(status_code=400, detail="Invalid file type.")
 
+    # Sanitize name
+    safe_name = "".join(c for c in guest_info["name"] if c.isalnum() or c in (' ', '_', '-')).strip()
+    if not safe_name:
+        safe_name = "Anonymous"
+
+    timestamp_uuid = f"{int(time.time())}_{uuid.uuid4().hex[:8]}"
+    upload_folder_name = f"{timestamp_uuid}_{safe_name}"
+    upload_folder_path = os.path.join(settings.UPLOAD_DIR, upload_folder_name)
+    os.makedirs(upload_folder_path, exist_ok=True)
+
     file_ext = os.path.splitext(file.filename)[1]
     unique_filename = f"{uuid.uuid4()}{file_ext}"
-    file_path = os.path.join(settings.UPLOAD_DIR, unique_filename)
+    file_path = os.path.join(upload_folder_path, unique_filename)
 
     # 2. Streaming Write & Hash
     sha256 = hashlib.sha256()
@@ -272,12 +291,41 @@ async def upload_media(
         os.remove(file_path)
         raise HTTPException(status_code=500, detail="Integrity check failed.")
 
-    # 5. Generate Thumbnail
-    thumb_file = await generate_thumbnail(file_path, content_type)
+    # 5. Generate Thumbnail (Save to THUMBNAIL_DIR)
+    thumb_filename = None
+    try:
+        thumb_name = f"thumb_{unique_filename}.jpg"
+        thumb_path = os.path.join(settings.THUMBNAIL_DIR, thumb_name)
+
+        if content_type.startswith("image"):
+            await asyncio.to_thread(_process_image_thumbnail, file_path, thumb_path)
+            thumb_filename = thumb_name
+        elif content_type.startswith("video") and settings.GENERATE_VIDEO_THUMBNAILS:
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(settings.VIDEO_THUMBNAIL_TIMESTAMP),
+                "-i", file_path,
+                "-vframes", "1",
+                "-q:v", "2",
+                thumb_path
+            ]
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL
+            )
+            await process.wait()
+            if os.path.exists(thumb_path):
+                thumb_filename = thumb_name
+    except Exception as e:
+        logger.error(f"Thumbnail generation failed: {e}")
 
     # 6. Save to DB
+    # Store relative path for filename including folder
+    relative_filename = os.path.join(upload_folder_name, unique_filename)
+
     new_media = Media(
-        filename=unique_filename,
+        filename=relative_filename,
         original_filename=file.filename,
         file_type="video" if content_type.startswith("video") else "image",
         mime_type=content_type,
@@ -286,10 +334,11 @@ async def upload_media(
         uploaded_by=guest_info["name"],
         table_number=guest_info["table"],
         caption=caption,
-        thumbnail_path=thumb_file
+        thumbnail_path=thumb_filename
     )
     db.add(new_media)
     await db.commit()
+    await db.refresh(new_media)
 
     return {"status": "success", "id": new_media.id}
 
@@ -324,7 +373,7 @@ async def slideshow_feed(
         data.append({
             "id": m.id,
             "url": f"/uploads/{m.filename}",
-            "thumbnail": f"/uploads/{m.thumbnail_path}" if m.thumbnail_path else None,
+            "thumbnail": f"/thumbnails/{m.thumbnail_path}" if m.thumbnail_path else None,
             "type": m.file_type, # image or video
             "caption": m.caption,
             "author": m.uploaded_by,
@@ -333,6 +382,42 @@ async def slideshow_feed(
         })
 
     return {"items": data, "next_cursor": data[-1]["created_at"] if data else None}
+
+@app.get("/my-uploads")
+async def my_uploads(
+    guest_info: dict = Depends(get_current_guest),
+    db: AsyncSession = Depends(get_db)
+):
+    """Returns uploads for the current guest session."""
+    if not guest_info["name"]:
+        return []
+
+    query = select(Media).where(
+        Media.uploaded_by == guest_info["name"],
+        Media.table_number == guest_info["table"]
+    ).order_by(desc(Media.created_at))
+
+    result = await db.execute(query)
+    media_items = result.scalars().all()
+
+    data = []
+    for m in media_items:
+        data.append({
+            "id": m.id,
+            "url": f"/uploads/{m.filename}",
+            "thumbnail": f"/thumbnails/{m.thumbnail_path}" if m.thumbnail_path else None,
+            "type": m.file_type,
+            "caption": m.caption,
+            "created_at": m.created_at.isoformat()
+        })
+    return data
+
+@app.get("/public/stats")
+async def public_stats(db: AsyncSession = Depends(get_db)):
+    """Public stats for the live feed."""
+    photo_count = await db.scalar(select(func.count(Media.id)).where(Media.file_type == 'image', Media.is_hidden == False))
+    video_count = await db.scalar(select(func.count(Media.id)).where(Media.file_type == 'video', Media.is_hidden == False))
+    return {"photos": photo_count, "videos": video_count}
 
 # --- Admin Routes ---
 
@@ -453,5 +538,3 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         "disk": disk_status,
         "status": "healthy" if db_status == "ok" and disk_status == "ok" else "unhealthy"
     }
-
-from sqlalchemy import text

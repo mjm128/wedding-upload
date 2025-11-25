@@ -12,172 +12,49 @@
 <body>
     <div id="banner" class="sticky-banner"></div>
 
-    <button class="theme-toggle" onclick="toggleTheme()">🌗</button>
+    <div class="top-toolbar">
+        <button class="icon-btn" onclick="toggleLanguage()" title="Switch Language">🌐</button>
+        <button class="icon-btn" onclick="showHelp()" title="Help">❓</button>
+        <button class="icon-btn" onclick="logout()" title="Logout">🚪</button>
+        <button class="icon-btn theme-toggle-btn" onclick="toggleTheme()">🌗</button>
+    </div>
 
     <div class="container" style="max-width: 600px; margin: 0 auto; padding: 20px;">
         <div class="glass-card" style="text-align: center;">
-            <h1>Share Your Memories</h1>
-            <p id="guest-welcome">Welcome!</p>
+            <h1 data-i18n="share_memories">Share Your Memories</h1>
+            <p id="guest-welcome" data-i18n="welcome">Welcome!</p>
+
+            <div style="margin-bottom: 15px;">
+                <a href="/slideshow" class="btn-secondary" style="padding: 5px 10px; font-size: 0.8em; text-decoration: none;">Live Feed</a>
+            </div>
 
             <form id="upload-form">
                 <input type="file" id="file-input" accept="image/*,video/*" style="display: none;" onchange="handleFileSelect(event)">
-                <button type="button" class="btn" onclick="document.getElementById('file-input').click()">
+                <button type="button" class="btn" onclick="document.getElementById('file-input').click()" data-i18n="select_files">
                     Select Photos & Videos
                 </button>
 
                 <div id="preview-area" style="margin-top: 20px;"></div>
 
-                <input type="text" id="caption" placeholder="Add a caption..." style="width: 100%; margin-top: 10px; padding: 10px; border-radius: 5px; border: none;">
+                <input type="text" id="caption" data-i18n-placeholder="add_caption" placeholder="Add a caption..." style="width: 100%; margin-top: 10px; padding: 10px; border-radius: 5px; border: none;">
 
                 <div id="progress-bar-container">
                     <div id="progress-bar"></div>
                 </div>
 
-                <button type="submit" class="btn" style="margin-top: 20px; width: 100%; display: none;" id="upload-btn">Upload</button>
+                <button type="submit" class="btn" style="margin-top: 20px; width: 100%; display: none;" id="upload-btn" data-i18n="upload_btn">Upload</button>
             </form>
         </div>
 
         <div class="glass-card">
-            <h2>Your Uploads</h2>
+            <h2 data-i18n="your_uploads">Your Uploads</h2>
             <div id="my-uploads">
                 <!-- List of uploads -->
             </div>
         </div>
     </div>
 
-    <script>
-        // --- Init ---
-        // Register Service Worker
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/static/sw.js');
-        }
-
-        // Check for Config/Banner
-        fetch('/config').then(r => r.json()).then(config => {
-            if (config.banner_message) {
-                const b = document.getElementById('banner');
-                b.innerText = config.banner_message;
-                b.style.display = 'block';
-            }
-            window.APP_CONFIG = config;
-        });
-
-        // Theme Toggle
-        function toggleTheme() {
-            const current = document.documentElement.getAttribute("data-theme");
-            const next = current === "light" ? "dark" : "light";
-            document.documentElement.setAttribute("data-theme", next);
-            localStorage.setItem("theme", next);
-        }
-        if (localStorage.getItem("theme") === "light") {
-            document.documentElement.setAttribute("data-theme", "light");
-        }
-
-        // --- File Handling ---
-        let selectedFile = null;
-
-        function handleFileSelect(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            // Validate Size
-            const maxSize = (window.APP_CONFIG?.max_file_size_mb || 500) * 1024 * 1024;
-            if (file.size > maxSize) {
-                alert("File too large!");
-                return;
-            }
-
-            // Video Duration Check (basic)
-            if (file.type.startsWith('video')) {
-                 const video = document.createElement('video');
-                 video.preload = 'metadata';
-                 video.onloadedmetadata = function() {
-                     window.URL.revokeObjectURL(video.src);
-                     const maxDuration = window.APP_CONFIG?.max_video_duration_sec || 60;
-                     if (video.duration > maxDuration) {
-                         alert("Video too long! Max " + maxDuration + " seconds.");
-                         selectedFile = null;
-                         document.getElementById('preview-area').innerHTML = '';
-                         document.getElementById('upload-btn').style.display = 'none';
-                         return;
-                     }
-                 }
-                 video.src = URL.createObjectURL(file);
-            }
-
-            selectedFile = file;
-            document.getElementById('upload-btn').style.display = 'block';
-
-            // Preview using blueimp-load-image for orientation fix
-            const previewArea = document.getElementById('preview-area');
-            previewArea.innerHTML = 'Generating preview...';
-
-            if (file.type.startsWith('image')) {
-                loadImage(
-                    file,
-                    function (img) {
-                        previewArea.innerHTML = '';
-                        img.style.maxWidth = '100%';
-                        img.style.borderRadius = '8px';
-                        previewArea.appendChild(img);
-                    },
-                    { maxWidth: 600, orientation: true }
-                );
-            } else {
-                previewArea.innerHTML = `Video selected: ${file.name}`;
-            }
-        }
-
-        document.getElementById('upload-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            if (!selectedFile) return;
-
-            // Wake Lock
-            let wakeLock = null;
-            try {
-                wakeLock = await navigator.wakeLock.request('screen');
-            } catch (err) {}
-
-            const formData = new FormData();
-            formData.append('file', selectedFile);
-            formData.append('caption', document.getElementById('caption').value);
-
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', '/upload', true);
-
-            xhr.upload.onprogress = function(e) {
-                if (e.lengthComputable) {
-                    const percentComplete = (e.loaded / e.total) * 100;
-                    document.getElementById('progress-bar-container').style.display = 'block';
-                    document.getElementById('progress-bar').style.width = percentComplete + '%';
-                }
-            };
-
-            xhr.onload = function() {
-                if (xhr.status === 200) {
-                    alert('Upload Successful!');
-                    document.getElementById('progress-bar-container').style.display = 'none';
-                    document.getElementById('file-input').value = '';
-                    document.getElementById('preview-area').innerHTML = '';
-                    document.getElementById('upload-btn').style.display = 'none';
-                    document.getElementById('caption').value = '';
-                    selectedFile = null;
-
-                    // Post Upload Action
-                    if (window.APP_CONFIG && window.APP_CONFIG.post_upload_url) {
-                        if (confirm(`Upload complete! Go to ${window.APP_CONFIG.post_upload_label || 'next step'}?`)) {
-                             window.location.href = window.APP_CONFIG.post_upload_url;
-                        }
-                    }
-                } else {
-                    alert('Upload failed: ' + xhr.responseText);
-                }
-                if (wakeLock) wakeLock.release();
-            };
-
-            xhr.send(formData);
-        });
-
-    </script>
+    <script src="/static/js/utils.js"></script>
+    <script src="/static/js/upload.js"></script>
 </body>
 </html>
