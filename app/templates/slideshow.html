@@ -83,7 +83,11 @@
 </head>
 <body>
     <div id="stats-overlay" class="stats-overlay"></div>
-    <a href="/" class="home-btn" title="Upload">🏠</a>
+
+    <div class="top-toolbar" style="right: auto; left: 20px; top: 70px;">
+        <a href="/" class="icon-btn" title="Home">🏠</a>
+        <button class="icon-btn" id="order-toggle" onclick="toggleOrder()" title="Toggle Order">🎲</button>
+    </div>
 
     <div class="slideshow-container" id="container">
         <!-- Slides -->
