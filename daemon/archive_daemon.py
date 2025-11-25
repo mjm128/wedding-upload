@@ -13,6 +13,9 @@ sys.path.append(os.getcwd())
 
 from app.config import settings
 
+# Ensure directories exist before logging
+os.makedirs(settings.ARCHIVE_DIR, exist_ok=True)
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
