@@ -47,6 +47,17 @@ async def init_db():
             await conn.execute(text("ALTER TABLE media ADD COLUMN guest_uuid VARCHAR;"))
             await conn.execute(text("CREATE INDEX ix_media_guest_uuid ON media (guest_uuid);"))
 
+        # Add view_count and last_viewed columns if they don't exist
+        try:
+            await conn.execute(text("SELECT view_count FROM media LIMIT 1;"))
+        except:
+            await conn.execute(text("ALTER TABLE media ADD COLUMN view_count INTEGER DEFAULT 0;"))
+
+        try:
+            await conn.execute(text("SELECT last_viewed FROM media LIMIT 1;"))
+        except:
+            await conn.execute(text("ALTER TABLE media ADD COLUMN last_viewed DATETIME;"))
+
 
         # Enable WAL mode for SQLite
         if "sqlite" in settings.DATABASE_URL:
