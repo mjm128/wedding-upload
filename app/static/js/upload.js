@@ -37,26 +37,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btn) btn.innerText = lang.toUpperCase();
 
     // Check Guest Name
-    checkGuestName();
+    updateWelcomeMessage();
 
     loadMyUploads();
 });
-
-function checkGuestName() {
-    const name = getCookie("guest_name");
-    if (!name) {
-        document.getElementById('setup-modal').style.display = 'flex';
-    } else {
-        const display = name.split('-').reverse().join(' ');
-        const welcome = document.getElementById('guest-welcome');
-        welcome.innerText = t('welcome').replace('{name}', display);
-
-        // Ensure UUID exists
-        if (!getCookie("guest_uuid")) {
-            document.cookie = `guest_uuid=${crypto.randomUUID()}; max-age=31536000; path=/; SameSite=Lax`;
-        }
-    }
-}
 
 function handleNameSubmit(e) {
     e.preventDefault();
@@ -83,14 +67,8 @@ function handleNameSubmit(e) {
     }
 
     document.getElementById('setup-modal').style.display = 'none';
-    checkGuestName();
+    updateWelcomeMessage();
     loadMyUploads();
-}
-
-function getCookie(name) {
-    const value = `; ${document.cookie}`;
-    const parts = value.split(`; ${name}=`);
-    if (parts.length === 2) return decodeURIComponent(parts.pop().split(';').shift());
 }
 
 function toggleTheme() {
@@ -259,7 +237,7 @@ async function loadMyUploads() {
                     <img src="${item.thumbnail || item.url}" class="media-content" loading="lazy" onclick="previewImage('${item.url}', '${item.type}')" style="cursor:zoom-in;">
                     <div style="margin-top:5px; font-size:0.8em;">
                         ${item.caption ? `<p style="margin:0;">${item.caption}</p>` : ''}
-                        <span style="color:#888; font-size:0.8em;">${new Date(item.created_at).toLocaleString()} | ${formatBytes(item.file_size || 0)}</span>
+                        <span style="color:#888; font-size:0.8em;">${toLocalTime(item.created_at)} | ${formatBytes(item.file_size || 0)}</span>
                     </div>
                 </div>
             `;
