@@ -7,6 +7,7 @@
     --glass-border: rgba(255, 255, 255, 0.2);
     --font-family: 'Inter', sans-serif;
     --header-font: 'Playfair Display', serif;
+    --input-border-color: var(--secondary-color);
 }
 
 [data-theme="light"] {
@@ -16,6 +17,7 @@
     --secondary-color: #8A8D91;
     --glass-bg: #ffffff;
     --glass-border: #dcdfe3;
+    --input-border-color: #ced4da;
 }
 
 body {
@@ -245,4 +247,9 @@ body.has-banner .home-btn {
   object-fit: contain;
   border-radius: 8px;
   background: rgba(0,0,0,0.2);
+}
+
+.content-hidden .container,
+.content-hidden .top-toolbar {
+    display: none;
 }

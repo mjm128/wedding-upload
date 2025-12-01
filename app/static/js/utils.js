@@ -215,6 +215,7 @@ function logout() {
     showConfirm(t('logout_confirm'), () => {
         document.cookie = "guest_name=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
         document.cookie = "table_number=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+        document.cookie = "guest_uuid=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
         location.reload();
     }, true); // Require checkbox
 }
