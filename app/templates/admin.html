@@ -21,10 +21,11 @@
     </div>
 
     <div class="container" style="max-width: 1000px; margin: 0 auto; padding: 20px;">
-        <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+        <div style="display:flex; justify-content:flex-end; gap: 10px; margin-bottom:10px;">
             <a href="/" class="btn-secondary" style="text-decoration:none; display:flex; align-items:center; padding:8px 12px; border-radius:20px;">
                 <span style="font-size:1.2em; margin-right:5px;">🏠</span> Home
             </a>
+            <button class="icon-btn" onclick="logout()" title="Logout">🚪</button>
         </div>
 
         <div class="glass-card">
@@ -35,6 +36,10 @@
 
             <div id="stats" style="margin-bottom: 20px; font-size: 0.9em; line-height: 1.6;">
                 Loading stats...
+            </div>
+
+            <div style="margin-bottom: 20px; font-size: 0.9em; color: var(--secondary-color);">
+                Detected Timezone: <span id="local-timezone"></span>
             </div>
 
             <div style="margin-bottom: 20px;">
@@ -84,6 +89,9 @@
             </div>
             <div id="media-grid" class="masonry-grid">
                 <!-- Loaded via JS -->
+            </div>
+            <div style="text-align: center; margin-top: 20px;">
+                <button id="load-more-btn" class="btn" onclick="loadMedia()" style="display: none;">Load More</button>
             </div>
         </div>
     </div>

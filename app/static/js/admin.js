@@ -1,13 +1,12 @@
 // admin.js - Admin Dashboard Logic
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Display local timezone
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    document.getElementById('local-timezone').innerText = tz;
+
     loadStats();
     loadMedia();
-    window.addEventListener('scroll', () => {
-        if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) {
-            loadMedia();
-        }
-    });
 });
 
 // Fetch Stats
@@ -86,9 +85,15 @@ async function loadSchedule() {
     list.innerHTML = '';
     schedule.forEach((item, index) => {
         const div = document.createElement('div');
+        div.className = 'schedule-item';
+        div.style.marginBottom = '10px';
         div.innerHTML = `
-            <span>${new Date(item.start).toLocaleString()} - ${new Date(item.end).toLocaleString()}: ${item.mode}</span>
-            <button onclick="deleteSchedule(${index})">Delete</button>
+            <div><strong>${item.mode.toUpperCase()}</strong>: ${toLocalTime(item.start)} - ${toLocalTime(item.end)}</div>
+            <div style="display:flex; gap:10px; margin-top:5px;">
+                <input type="text" id="schedule-msg-${index}" value="${item.message || ''}" placeholder="Custom message..." style="flex:1;">
+                <button class="btn-secondary" onclick="updateSchedule(${index})">Update</button>
+                <button class="btn-secondary" style="border-color:red; color:red;" onclick="deleteSchedule(${index})">Delete</button>
+            </div>
         `;
         list.appendChild(div);
     });
@@ -113,6 +118,17 @@ async function addSchedule() {
     }
 }
 
+async function updateSchedule(index) {
+    const message = document.getElementById(`schedule-msg-${index}`).value;
+    const res = await fetch(`/admin/schedule/${index}?message=${encodeURIComponent(message)}`, { method: 'PUT' });
+    if (res.ok) {
+        showToast("Schedule updated.");
+        loadSchedule();
+    } else {
+        showToast("Failed to update schedule.");
+    }
+}
+
 async function deleteSchedule(index) {
     const res = await fetch(`/admin/schedule/${index}`, { method: 'DELETE' });
     if (res.ok) {
@@ -128,14 +144,13 @@ document.addEventListener('DOMContentLoaded', loadSchedule);
 let cursor = null;
 let isLoading = false;
 
-async function loadMedia(reset = false) {
+async function loadMedia() {
     if (isLoading) return;
-    if (reset) {
-        cursor = null;
-    }
+
     const query = document.getElementById('media-search').value;
     const filter = document.querySelector('input[name="filter"]:checked').value;
     const type = document.querySelector('input[name="type"]:checked').value;
+    const loadMoreBtn = document.getElementById('load-more-btn');
 
     let url = `/slideshow/feed?limit=6&admin_mode=true`;
     if (cursor) url += `&cursor=${cursor}`;
@@ -144,14 +159,21 @@ async function loadMedia(reset = false) {
     if (type !== 'all') url += `&type=${type}`;
 
     isLoading = true;
+    loadMoreBtn.innerText = "Loading...";
+    loadMoreBtn.disabled = true;
+
     const res = await fetch(url);
     const data = await res.json();
+
     isLoading = false;
+    loadMoreBtn.innerText = "Load More";
+    loadMoreBtn.disabled = false;
 
     const grid = document.getElementById('media-grid');
 
     if (data.items.length === 0 && !cursor) {
-        if (grid.innerHTML === '') grid.innerHTML = '<p>No media found.</p>';
+        grid.innerHTML = '<p>No media found.</p>';
+        loadMoreBtn.style.display = 'none';
         return;
     }
 
@@ -170,7 +192,7 @@ async function loadMedia(reset = false) {
                     <button class="btn-secondary" style="padding: 5px; color: red; border-color: red; flex:1;" onclick="action(${item.id}, 'delete')">Delete</button>
                 </div>
                 <div style="margin-top:5px; font-size:0.8em; color:#888;">
-                    ${new Date(item.created_at).toLocaleString()}<br>
+                    ${toLocalTime(item.created_at)}<br>
                     ${formatBytes(item.file_size || 0)}
                 </div>
             </div>
@@ -178,12 +200,12 @@ async function loadMedia(reset = false) {
         grid.appendChild(div);
     });
 
-    if (data.items.length > 0) {
-        // Fix: Only update cursor if the new items provide a new cursor (older items)
-        // The backend returns next_cursor as the created_at of the LAST item.
-        cursor = data.next_cursor;
+    cursor = data.next_cursor;
+
+    if (cursor) {
+        loadMoreBtn.style.display = 'block';
     } else {
-        // No more items to load
+        loadMoreBtn.style.display = 'none';
     }
 }
 
