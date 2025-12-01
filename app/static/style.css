@@ -1,21 +1,23 @@
 :root {
     --bg-color: #000000;
     --text-color: #E0E0E0;
-    --accent-color: #D4AF37; /* Gold */
+    --accent-color: #D8DE9B; /* Chardonnay Mist */
     --secondary-color: #4A4A4A;
     --glass-bg: rgba(255, 255, 255, 0.1);
     --glass-border: rgba(255, 255, 255, 0.2);
     --font-family: 'Inter', sans-serif;
     --header-font: 'Playfair Display', serif;
+    --input-border-color: var(--secondary-color);
 }
 
 [data-theme="light"] {
     --bg-color: #f0f2f5;
     --text-color: #1c1e21;
-    --accent-color: #D4AF37;
+    --accent-color: #5C6724; /* Dark Olive Green */
     --secondary-color: #8A8D91;
     --glass-bg: #ffffff;
     --glass-border: #dcdfe3;
+    --input-border-color: #ced4da;
 }
 
 body {
@@ -245,4 +247,9 @@ body.has-banner .home-btn {
   object-fit: contain;
   border-radius: 8px;
   background: rgba(0,0,0,0.2);
+}
+
+.content-hidden .container,
+.content-hidden .top-toolbar {
+    display: none;
 }

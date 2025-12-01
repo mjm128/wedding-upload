@@ -3,11 +3,14 @@
 let queue = [];
 let currentIndex = -1;
 let container = document.getElementById('container');
-let cursor = null; // Timestamp for pagination/newest
 let isFetching = false;
+let currentOrder = 'newest'; // 'newest' or 'random'
 
 // --- Init ---
 document.addEventListener('DOMContentLoaded', () => {
+    const orderToggle = document.getElementById('order-toggle');
+    orderToggle.addEventListener('click', toggleOrder);
+
     loadInitial();
 
     // Config poller
@@ -47,15 +50,40 @@ async function pollStats() {
 
 // --- Media Fetching ---
 
+function toggleOrder() {
+    currentOrder = (currentOrder === 'newest') ? 'random' : 'newest';
+    const orderToggle = document.getElementById('order-toggle');
+    if (currentOrder === 'random') {
+        orderToggle.innerHTML = '🎲 Random';
+    } else {
+        orderToggle.textContent = 'Newest';
+    }
+    // Reload data with new order
+    loadInitial();
+}
+
+function resetSlideshow() {
+    // Clear intervals associated with video playback
+    const oldVideo = container.querySelector('video');
+    if (oldVideo) {
+        oldVideo.onended = null;
+    }
+    // Stop any pending nextSlide timeouts
+    clearTimeout(window.nextSlideTimeout);
+
+    container.innerHTML = '';
+    queue = [];
+    currentIndex = -1;
+}
+
 async function loadInitial() {
-    // Load existing media (limit 50)
+    resetSlideshow();
     try {
-        const res = await fetch('/slideshow/feed?limit=50');
+        const res = await fetch(`/slideshow/feed?limit=50&order=${currentOrder}`);
         const data = await res.json();
         queue = data.items;
 
         if (queue.length > 0) {
-            // Start the show
             nextSlide();
         } else {
             container.innerHTML = '<div style="color:white; font-family:var(--header-font)">Waiting for uploads...</div>';
@@ -71,16 +99,8 @@ async function fetchMore() {
     if (isFetching) return;
     isFetching = true;
 
-    // Strategy: We want to intersperse new photos.
-    // If we just cycle `queue`, we show old stuff.
-    // We need to poll for *new* stuff periodically and inject it.
-    // The API uses `cursor` (created_at) to get older stuff.
-    // We want NEWER stuff. The API `feed` endpoints usually return newest first.
-    // If we ask for feed without cursor, we get newest.
-    // So we can check if the newest item ID is already in our queue.
-
     try {
-        const res = await fetch('/slideshow/feed?limit=20');
+        const res = await fetch(`/slideshow/feed?limit=20&order=${currentOrder}`);
         const data = await res.json();
         const newItems = data.items;
 
@@ -197,10 +217,10 @@ function nextSlide() {
     }
 
     if (item.type !== 'video') {
-        setTimeout(nextSlide, duration);
+        window.nextSlideTimeout = setTimeout(nextSlide, duration);
     } else {
         // Video safety timeout
-         setTimeout(() => {
+         window.nextSlideTimeout = setTimeout(() => {
              if (el.paused || !el.ended) {
                  // Check if it's still playing?
                  // Just force next slide if it's been too long
