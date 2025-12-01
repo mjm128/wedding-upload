@@ -215,6 +215,7 @@ function logout() {
     showConfirm(t('logout_confirm'), () => {
         document.cookie = "guest_name=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
         document.cookie = "table_number=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+        document.cookie = "guest_uuid=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
         location.reload();
     }, true); // Require checkbox
 }
@@ -229,7 +230,10 @@ function updateWelcomeMessage() {
     const name = getCookie("guest_name");
     if (!name) {
         document.getElementById('setup-modal').style.display = 'flex';
+        document.body.classList.add('content-hidden'); // Ensure content is hidden if modal is up
     } else {
+        document.getElementById('setup-modal').style.display = 'none';
+        document.body.classList.remove('content-hidden'); // Unhide content
         const display = name.split('-').reverse().join(', ');
         const welcome = document.getElementById('guest-welcome');
         welcome.innerText = t('welcome').replace('{name}', display);
