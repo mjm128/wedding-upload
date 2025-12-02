@@ -392,31 +392,11 @@ async def slideshow_feed(
     type: Optional[str] = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Returns media items.
-    Cursor is a timestamp (ISO string).
-    """
     query = select(Media)
 
+    # 1. Basic Filters
     if not admin_mode:
         query = query.where(Media.is_hidden == False)
-        if order == 'random':
-            # Biased Sorting for slideshow
-            now = datetime.now(pytz.utc)
-            age_in_minutes = func.julianday('now') * 24 * 60 - func.julianday(Media.created_at) * 24 * 60
-
-            # Score: Starred items get a huge boost. Very new items (last 5 min) get a boost.
-            score = (
-                (func.cast(Media.is_starred, Integer) * 1000) +
-                func.iif(age_in_minutes < 5, 500, 0) +
-                (100 / (age_in_minutes + 10))
-            ).label("score")
-            query = query.order_by(desc(score))
-        else: # newest
-            query = query.order_by(desc(Media.created_at), desc(Media.id))
-    else:
-        # Admin view always gets chronological
-        query = query.order_by(desc(Media.created_at), desc(Media.id))
 
     if filter == "starred":
         query = query.where(Media.is_starred == True)
@@ -434,21 +414,41 @@ async def slideshow_feed(
             Media.original_filename.ilike(search)
         ))
 
-    if admin_mode:
+    # 2. Sorting & Pagination
+    # Check if we are in "Random" mode (Public only)
+    is_random_order = (not admin_mode) and (order == 'random')
+
+    if is_random_order:
+        # --- Random Mode (No Cursor Pagination) ---
+        now = datetime.now(pytz.utc)
+        age_in_minutes = func.julianday('now') * 24 * 60 - func.julianday(Media.created_at) * 24 * 60
+        
+        score = (
+            (func.cast(Media.is_starred, Integer) * 1000) +
+            func.iif(age_in_minutes < 5, 500, 0) +
+            (100 / (age_in_minutes + 10))
+        ).label("score")
+        query = query.order_by(desc(score))
+    
+    else:
+        # --- Chronological Mode (Admin OR Public Newest) ---
+        # This applies cursor logic to BOTH Admin and Public
         if cursor:
             try:
                 cursor_ts, cursor_id = cursor.split('_')
                 cursor_dt = datetime.fromisoformat(cursor_ts)
-                # Efficient pagination: (created_at < cursor) OR (created_at == cursor AND id < cursor_id)
+                
                 query = query.where(
                     (Media.created_at < cursor_dt) |
                     ((Media.created_at == cursor_dt) & (Media.id < int(cursor_id)))
                 )
             except ValueError:
-                pass # Invalid cursor
+                pass 
+
+        # Unified Sort Order
         query = query.order_by(desc(Media.created_at), desc(Media.id))
 
-
+    # 3. Execution
     query = query.limit(limit)
 
     result = await db.execute(query)
@@ -460,7 +460,7 @@ async def slideshow_feed(
             "id": m.id,
             "url": f"/uploads/{m.filename}",
             "thumbnail": f"/thumbnails/{m.thumbnail_path}" if m.thumbnail_path else None,
-            "type": m.file_type, # image or video
+            "type": m.file_type,
             "caption": m.caption,
             "author": m.uploaded_by,
             "created_at": m.created_at.isoformat(),
@@ -471,9 +471,13 @@ async def slideshow_feed(
             "original_filename": m.original_filename
         })
 
-    next_cursor = f"{data[-1]['created_at']}_{data[-1]['id']}" if data else None
-    return {"items": data, "next_cursor": next_cursor}
+    # Optimization: If we got fewer items than limit, we are at the end.
+    if len(data) < limit:
+        next_cursor = None
+    else:
+        next_cursor = f"{data[-1]['created_at']}_{data[-1]['id']}" if data else None
 
+    return {"items": data, "next_cursor": next_cursor}
 
 @app.post("/media/{media_id}/viewed")
 async def mark_media_viewed(media_id: int, db: AsyncSession = Depends(get_db)):
