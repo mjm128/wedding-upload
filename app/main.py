@@ -255,6 +255,26 @@ async def upload_media(
         detail_message = schedule_info.get("message") or "Uploads are currently paused."
         raise HTTPException(status_code=403, detail=detail_message)
 
+    # Check Throttling
+    throttle_limit = settings.THROTTLE_DEFAULT_LIMIT
+    throttle_window = settings.THROTTLE_WINDOW_MIN
+
+    cutoff_time = datetime.now(pytz.utc) - timedelta(minutes=throttle_window)
+
+    # Count uploads by this guest since cutoff_time
+    # guest_info["uuid"] is required for upload so we can trust it exists
+    query = select(func.count(Media.id)).where(
+        Media.guest_uuid == guest_info["uuid"],
+        Media.created_at >= cutoff_time
+    )
+    upload_count = await db.scalar(query)
+
+    if upload_count >= throttle_limit:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Upload limit reached ({throttle_limit} uploads per {throttle_window} mins). Please wait."
+        )
+
     # 1. Validation
     # We can't easily validate size before streaming without relying on Content-Length header, which can be spoofed.
     # We will monitor size during read.
