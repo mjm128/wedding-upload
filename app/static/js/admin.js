@@ -162,52 +162,61 @@ async function loadMedia() {
     loadMoreBtn.innerText = "Loading...";
     loadMoreBtn.disabled = true;
 
-    const res = await fetch(url);
-    const data = await res.json();
+    try {
+        const res = await fetch(url);
+        const data = await res.json();
+        const grid = document.getElementById('media-grid');
 
-    cursor = data.next_cursor;
-    
-    const grid = document.getElementById('media-grid');
+        // Update cursor immediately
+        cursor = data.next_cursor;
 
-    isLoading = false;
-    loadMoreBtn.innerText = "Load More";
-    loadMoreBtn.disabled = false;
+        if (data.items.length === 0 && !cursor && grid.innerHTML === '') {
+            grid.innerHTML = '<p>No media found.</p>';
+        }
 
-    if (data.items.length === 0 && !cursor) {
-        grid.innerHTML = '<p>No media found.</p>';
-        loadMoreBtn.style.display = 'none';
-        return;
-    }
+        data.items.forEach(item => {
+            // FIX 1: Deduplication Check
+            // If the element ID already exists, do not append it again.
+            if (document.getElementById(`media-item-${item.id}`)) return;
 
-    data.items.forEach(item => {
-        const div = document.createElement('div');
-        div.className = 'grid-item';
-        div.innerHTML = `
-            <div class="glass-card" style="padding: 10px;">
-                <div style="font-size:0.7em; color:#aaa; margin-bottom:5px;">UUID: ${item.filename.split('/').pop().split('.')[0]}</div>
-                ${item.type === 'video' ? '<span style="color:gold; font-weight:bold;">[VIDEO]</span>' : ''}
-                <img src="${item.thumbnail || item.url}" class="media-content ${item.is_hidden ? 'hidden-media' : ''} ${item.is_starred ? 'starred-media' : ''}" loading="lazy">
-                <p><strong>${item.author || 'Guest'}</strong><br>${item.caption || ''}</p>
-                <div style="display: flex; gap: 5px; flex-wrap: wrap;">
-                    <button class="btn-secondary" style="padding: 5px; flex:1;" onclick="action(${item.id}, '${item.is_hidden ? 'unhide' : 'hide'}')">${item.is_hidden ? 'Unhide' : 'Hide'}</button>
-                    <button class="btn-secondary" style="padding: 5px; flex:1;" onclick="action(${item.id}, '${item.is_starred ? 'unstar' : 'star'}')">${item.is_starred ? 'Unstar' : 'Star'}</button>
-                    <button class="btn-secondary" style="padding: 5px; color: red; border-color: red; flex:1;" onclick="action(${item.id}, 'delete')">Delete</button>
+            const div = document.createElement('div');
+            div.className = 'grid-item';
+            div.id = `media-item-${item.id}`; // Add ID for the check above
+            
+            div.innerHTML = `
+                <div class="glass-card" style="padding: 10px;">
+                    <div style="font-size:0.7em; color:#aaa; margin-bottom:5px;">UUID: ${item.filename.split('/').pop().split('.')[0]}</div>
+                    ${item.type === 'video' ? '<span style="color:gold; font-weight:bold;">[VIDEO]</span>' : ''}
+                    <img src="${item.thumbnail || item.url}" class="media-content ${item.is_hidden ? 'hidden-media' : ''} ${item.is_starred ? 'starred-media' : ''}" loading="lazy">
+                    <p><strong>${item.author || 'Guest'}</strong><br>${item.caption || ''}</p>
+                    <div style="display: flex; gap: 5px; flex-wrap: wrap;">
+                        <button class="btn-secondary" style="padding: 5px; flex:1;" onclick="action(${item.id}, '${item.is_hidden ? 'unhide' : 'hide'}')">${item.is_hidden ? 'Unhide' : 'Hide'}</button>
+                        <button class="btn-secondary" style="padding: 5px; flex:1;" onclick="action(${item.id}, '${item.is_starred ? 'unstar' : 'star'}')">${item.is_starred ? 'Unstar' : 'Star'}</button>
+                        <button class="btn-secondary" style="padding: 5px; color: red; border-color: red; flex:1;" onclick="action(${item.id}, 'delete')">Delete</button>
+                    </div>
+                    <div style="margin-top:5px; font-size:0.8em; color:#888;">
+                        ${toLocalTime(item.created_at)}<br>
+                        ${formatBytes(item.file_size || 0)}
+                    </div>
                 </div>
-                <div style="margin-top:5px; font-size:0.8em; color:#888;">
-                    ${toLocalTime(item.created_at)}<br>
-                    ${formatBytes(item.file_size || 0)}
-                </div>
-            </div>
-        `;
-        grid.appendChild(div);
-    });
+            `;
+            grid.appendChild(div);
+        });
 
-    cursor = data.next_cursor;
+    } catch (err) {
+        console.error("Error loading media:", err);
+    } finally {
+        // FIX 2: Re-enable button LAST
+        // This ensures we don't allow a new click until the DOM is fully updated
+        isLoading = false;
+        loadMoreBtn.innerText = "Load More";
 
-    if (cursor) {
-        loadMoreBtn.style.display = 'block';
-    } else {
-        loadMoreBtn.style.display = 'none';
+        if (cursor) {
+            loadMoreBtn.disabled = false;
+            loadMoreBtn.style.display = 'block';
+        } else {
+            loadMoreBtn.style.display = 'none';
+        }
     }
 }
 
