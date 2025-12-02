@@ -91,6 +91,16 @@ def load_schedule():
         logger.error(f"Error loading or sorting schedule: {e}")
         return []
 
+async def get_throttle_config(db: AsyncSession):
+    """Fetches throttle config from DB or returns defaults."""
+    keys = ["THROTTLE_LIMIT", "THROTTLE_WINDOW"]
+    result = await db.execute(select(AppConfig).where(AppConfig.key.in_(keys)))
+    config = {c.key: c.value for c in result.scalars()}
+
+    limit = int(config.get("THROTTLE_LIMIT", settings.THROTTLE_DEFAULT_LIMIT))
+    window = int(config.get("THROTTLE_WINDOW", settings.THROTTLE_WINDOW_MIN))
+    return limit, window
+
 def check_schedule_mode():
     """
     Returns the current mode, a message, and time remaining to next state change.
@@ -254,6 +264,25 @@ async def upload_media(
     if schedule_info.get("mode") == "blackout":
         detail_message = schedule_info.get("message") or "Uploads are currently paused."
         raise HTTPException(status_code=403, detail=detail_message)
+
+    # Check Throttling
+    throttle_limit, throttle_window = await get_throttle_config(db)
+
+    cutoff_time = datetime.now(pytz.utc) - timedelta(minutes=throttle_window)
+
+    # Count uploads by this guest since cutoff_time
+    # guest_info["uuid"] is required for upload so we can trust it exists
+    query = select(func.count(Media.id)).where(
+        Media.guest_uuid == guest_info["uuid"],
+        Media.created_at >= cutoff_time
+    )
+    upload_count = await db.scalar(query)
+
+    if upload_count >= throttle_limit:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Upload limit reached ({throttle_limit} uploads per {throttle_window} mins). Please wait."
+        )
 
     # 1. Validation
     # We can't easily validate size before streaming without relying on Content-Length header, which can be spoofed.
@@ -712,6 +741,8 @@ async def admin_stats(is_admin: bool = Depends(get_admin_user), db: AsyncSession
     except Exception:
         pass
 
+    throttle_limit, throttle_window = await get_throttle_config(db)
+
     return {
         "disk_total_gb": round(usage.total / (1024**3), 2),
         "disk_used_gb": round(usage.used / (1024**3), 2),
@@ -724,8 +755,34 @@ async def admin_stats(is_admin: bool = Depends(get_admin_user), db: AsyncSession
         "ram_used_gb": round(ram.used / (1024**3), 2),
         "last_backup": last_backup,
         "rclone_configured": rclone_configured,
-        "cpu_temp": cpu_temp
+        "cpu_temp": cpu_temp,
+        "throttle_limit": throttle_limit,
+        "throttle_window": throttle_window,
+        "timezone": settings.EVENT_TIMEZONE
     }
+
+@app.post("/admin/throttle")
+async def set_throttle(
+    limit: int = Form(...),
+    window: int = Form(...),
+    is_admin: bool = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db)
+):
+    if not is_admin: raise HTTPException(status_code=401)
+
+    async def upsert_config(key: str, value: str):
+        result = await db.execute(select(AppConfig).where(AppConfig.key == key))
+        config = result.scalar_one_or_none()
+        if config:
+            config.value = value
+        else:
+            db.add(AppConfig(key=key, value=value))
+
+    await upsert_config("THROTTLE_LIMIT", str(limit))
+    await upsert_config("THROTTLE_WINDOW", str(window))
+
+    await db.commit()
+    return {"status": "updated"}
 
 @app.post("/admin/banner")
 async def set_banner(
