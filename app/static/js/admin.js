@@ -165,11 +165,13 @@ async function loadMedia() {
     const res = await fetch(url);
     const data = await res.json();
 
+    cursor = data.next_cursor;
+    
+    const grid = document.getElementById('media-grid');
+
     isLoading = false;
     loadMoreBtn.innerText = "Load More";
     loadMoreBtn.disabled = false;
-
-    const grid = document.getElementById('media-grid');
 
     if (data.items.length === 0 && !cursor) {
         grid.innerHTML = '<p>No media found.</p>';
