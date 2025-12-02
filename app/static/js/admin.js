@@ -1,10 +1,6 @@
 // admin.js - Admin Dashboard Logic
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Display local timezone
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    document.getElementById('local-timezone').innerText = tz;
-
     loadStats();
     loadMedia();
 });
@@ -17,17 +13,39 @@ function loadStats() {
     ]).then(([adminStats, publicStats]) => {
         const rcloneStatus = adminStats.rclone_configured ? '<span style="color: limegreen;">Configured</span>' : '<span style="color: orange;">Not Configured</span>';
         const cpuTemp = adminStats.cpu_temp !== "N/A" ? `(${adminStats.cpu_temp})` : '';
+
+        // Populate Throttle Inputs
+        document.getElementById('throttle-limit').value = adminStats.throttle_limit;
+        document.getElementById('throttle-window').value = adminStats.throttle_window;
+
         document.getElementById('stats').innerHTML = `
             <h3>System Metrics</h3>
             <strong>CPU:</strong> ${adminStats.cpu_percent}% ${cpuTemp} | <strong>RAM:</strong> ${adminStats.ram_percent}% (${adminStats.ram_used_gb}GB)<br>
             <strong>Storage:</strong> ${adminStats.disk_used_gb}GB / ${adminStats.disk_total_gb}GB (Free: ${adminStats.disk_free_gb}GB)<br>
-            <strong>Rclone:</strong> ${rcloneStatus} | <strong>Last Backup:</strong> ${adminStats.last_backup}<br><br>
+            <strong>Rclone:</strong> ${rcloneStatus} | <strong>Last Backup:</strong> ${adminStats.last_backup}<br>
+            <strong>Timezone:</strong> ${adminStats.timezone}<br><br>
 
             <h3>Media Breakdown</h3>
             <strong>Total Media:</strong> ${publicStats.total_media}<br>
             <strong>Photos:</strong> ${publicStats.photos} | <strong>Videos:</strong> ${publicStats.videos}
         `;
     });
+}
+
+async function updateThrottle() {
+    const limit = document.getElementById('throttle-limit').value;
+    const window = document.getElementById('throttle-window').value;
+    const fd = new FormData();
+    fd.append('limit', limit);
+    fd.append('window', window);
+
+    const res = await fetch('/admin/throttle', { method: 'POST', body: fd });
+    if (res.ok) {
+        showToast("Throttling updated");
+        loadStats();
+    } else {
+        showToast("Update failed");
+    }
 }
 
 let searchTimeout = null;

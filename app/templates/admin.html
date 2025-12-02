@@ -38,10 +38,6 @@
                 Loading stats...
             </div>
 
-            <div style="margin-bottom: 20px; font-size: 0.9em; color: var(--secondary-color);">
-                Detected Timezone: <span id="local-timezone"></span>
-            </div>
-
             <div style="margin-bottom: 20px;">
                 <h3>Media Moderation</h3>
             </div>
@@ -69,6 +65,16 @@
                     <input type="text" id="schedule-message" placeholder="Custom message (optional)" style="flex:2;">
                     <button class="btn" onclick="addSchedule()">Add</button>
                 </div>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+                <h3>Throttling Settings</h3>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <label>Limit (uploads): <input type="number" id="throttle-limit" style="width: 60px; padding: 5px;"></label>
+                    <label>Window (minutes): <input type="number" id="throttle-window" style="width: 60px; padding: 5px;"></label>
+                    <button class="btn" onclick="updateThrottle()">Update Throttling</button>
+                </div>
+                <p style="font-size:0.8em; color:#888;">Controls how many files a guest can upload within a rolling time window.</p>
             </div>
         </div>
 
