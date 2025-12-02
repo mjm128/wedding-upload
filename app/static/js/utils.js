@@ -20,7 +20,9 @@ const TRANSLATIONS = {
         "help_text": "Select photos or videos from your gallery. Add a caption if you like. Once uploaded, your memories will appear on the live slideshow!",
         "close": "Close",
         "logout_confirm": "Are you sure you want to logout? You will lose access to your previous uploads history on this device.",
-        "permanent_action": "I understand this action is permanent."
+        "permanent_action": "I understand this action is permanent.",
+        "throttle_error": "Upload limit reached. Please wait a moment.",
+        "blackout_error": "Uploads are currently paused."
     },
     "es": {
         "share_memories": "Comparte tus Recuerdos",
@@ -41,7 +43,9 @@ const TRANSLATIONS = {
         "help_text": "Selecciona fotos o videos de tu galería. Añade un título si quieres. ¡Una vez subidos, tus recuerdos aparecerán en la presentación en vivo!",
         "close": "Cerrar",
         "logout_confirm": "¿Estás seguro de que quieres cerrar sesión? Perderás el acceso al historial de tus subidas anteriores en este dispositivo.",
-        "permanent_action": "Entiendo que esta acción es permanente."
+        "permanent_action": "Entiendo que esta acción es permanente.",
+        "throttle_error": "Límite de subida alcanzado. Por favor espera un momento.",
+        "blackout_error": "Las subidas están pausadas actualmente."
     }
 };
 

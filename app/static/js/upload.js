@@ -184,6 +184,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     success = true;
                 } catch (error) {
                     console.error(`Upload attempt ${attempt + 1} failed:`, error);
+
+                    if (error.status === 403 || error.status === 429) {
+                        const msgKey = error.status === 403 ? 'blackout_error' : 'throttle_error';
+                        showConfirm(t(msgKey), () => {});
+                        break;
+                    }
+
                     attempt++;
                     if (attempt < maxRetries) {
                         uploadBtn.innerText = `Retrying (${attempt}/${maxRetries})...`;
@@ -329,7 +336,9 @@ function uploadWithProgress(formData, onProgress) {
                 } catch (e) {
                     // Ignore parsing error
                 }
-                reject(new Error(errorMsg));
+                const err = new Error(errorMsg);
+                err.status = xhr.status;
+                reject(err);
             }
         };
 
