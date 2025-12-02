@@ -36,9 +36,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const btn = document.getElementById('lang-btn');
     if (btn) btn.innerText = lang.toUpperCase();
 
-    // Check Guest Name
+    // Check Guest Name on initial load
     updateWelcomeMessage();
+    loadMyUploads();
+});
 
+// Also check when navigating back to the page (bfcache)
+window.addEventListener('pageshow', function(event) {
+    // If the page is from the cache, the user is likely still "logged in"
+    // so we re-check the welcome message to unhide content.
+    updateWelcomeMessage();
+    // We might also want to refresh the uploads list
     loadMyUploads();
 });
 
@@ -61,12 +69,10 @@ function handleNameSubmit(e) {
     document.cookie = `guest_name=${encodeURIComponent(fullName)}; max-age=31536000; path=/; SameSite=Lax`;
     document.cookie = `table_number=0; max-age=31536000; path=/; SameSite=Lax`;
 
-    // Set UUID
-    if (!getCookie("guest_uuid")) {
-        document.cookie = `guest_uuid=${crypto.randomUUID()}; max-age=31536000; path=/; SameSite=Lax`;
-    }
+    // Force a new UUID on every login to ensure session separation
+    document.cookie = `guest_uuid=${crypto.randomUUID()}; max-age=31536000; path=/; SameSite=Lax`;
 
-    document.getElementById('setup-modal').style.display = 'none';
+    // updateWelcomeMessage will now handle modal and content visibility
     updateWelcomeMessage();
     loadMyUploads();
 }
