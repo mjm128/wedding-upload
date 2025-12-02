@@ -456,6 +456,11 @@ async def slideshow_feed(
 
     data = []
     for m in media_items:
+        # Ensure created_at has timezone info (UTC) for frontend to localize
+        created_at_iso = m.created_at.isoformat()
+        if m.created_at.tzinfo is None:
+            created_at_iso = m.created_at.replace(tzinfo=pytz.utc).isoformat()
+
         data.append({
             "id": m.id,
             "url": f"/uploads/{m.filename}",
@@ -463,7 +468,7 @@ async def slideshow_feed(
             "type": m.file_type,
             "caption": m.caption,
             "author": m.uploaded_by,
-            "created_at": m.created_at.isoformat(),
+            "created_at": created_at_iso,
             "is_starred": m.is_starred,
             "file_size": m.file_size_bytes,
             "is_hidden": m.is_hidden,
@@ -475,7 +480,8 @@ async def slideshow_feed(
     if len(data) < limit:
         next_cursor = None
     else:
-        next_cursor = f"{data[-1]['created_at']}_{data[-1]['id']}" if data else None
+        last_item = media_items[-1]
+        next_cursor = f"{last_item.created_at.isoformat()}_{last_item.id}" if media_items else None
 
     return {"items": data, "next_cursor": next_cursor}
 
@@ -512,13 +518,18 @@ async def my_uploads(
 
     data = []
     for m in media_items:
+        # Ensure created_at has timezone info (UTC)
+        created_at_iso = m.created_at.isoformat()
+        if m.created_at.tzinfo is None:
+            created_at_iso = m.created_at.replace(tzinfo=pytz.utc).isoformat()
+
         data.append({
             "id": m.id,
             "url": f"/uploads/{m.filename}",
             "thumbnail": f"/thumbnails/{m.thumbnail_path}" if m.thumbnail_path else None,
             "type": m.file_type,
             "caption": m.caption,
-            "created_at": m.created_at.isoformat(),
+            "created_at": created_at_iso,
             "file_size": m.file_size_bytes
         })
     return data
@@ -769,7 +780,7 @@ async def media_action(
         try:
             os.remove(os.path.join(settings.UPLOAD_DIR, media.filename))
             if media.thumbnail_path:
-                os.remove(os.path.join(settings.UPLOAD_DIR, media.thumbnail_path))
+                os.remove(os.path.join(settings.THUMBNAIL_DIR, media.thumbnail_path))
         except:
             pass
 
